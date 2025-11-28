@@ -1,0 +1,37 @@
+ManifestFileVersion: 0
+UnityVersion: 6000.0.62f1
+CRC: 1544771170
+Hashes:
+  AssetFileHash:
+    serializedVersion: 2
+    Hash: d19557783d9b0fdea7c2b7028d6824a0
+  TypeTreeHash:
+    serializedVersion: 2
+    Hash: 44049a8d1a4f8968ed8d7c9d8018d858
+  IncrementalBuildHash:
+    serializedVersion: 2
+    Hash: 24cf0de639bd77682cc9e48621c3ef23
+HashAppended: 0
+ClassTypes:
+- Class: 1
+  Script: {instanceID: 0}
+- Class: 4
+  Script: {instanceID: 0}
+- Class: 21
+  Script: {instanceID: 0}
+- Class: 23
+  Script: {instanceID: 0}
+- Class: 33
+  Script: {instanceID: 0}
+- Class: 43
+  Script: {instanceID: 0}
+- Class: 48
+  Script: {instanceID: 0}
+- Class: 64
+  Script: {instanceID: 0}
+- Class: 65
+  Script: {instanceID: 0}
+SerializeReferenceClassIdentifiers: []
+Assets:
+- Assets/Prefabs/Maps/AssetBundles/Arena_Color.prefab
+Dependencies: []
