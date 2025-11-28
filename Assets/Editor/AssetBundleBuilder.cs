@@ -1,7 +1,6 @@
 using UnityEditor;
 using System.IO;
 using UnityEngine;
-
 public class AssetBundleBuilder
 {
     [MenuItem("Assets/Build AssetBundles")]
