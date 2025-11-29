@@ -1,8 +1,12 @@
 ﻿using Fusion;
-using UnityEngine;
+using Scripts.Gameplay;
 using System.Collections.Generic;
 using System.Linq;
+using UnityEngine;
 
+/// <summary>
+/// Server-side pool. Spawns a bunch of NetworkObjects and uses a networked "IsActive" flag on the Projectile component to mark usage.
+/// </summary>
 public class NetworkProjectilePool : MonoBehaviour
 {
     public static NetworkProjectilePool Instance { get; private set; }
@@ -22,7 +26,6 @@ public class NetworkProjectilePool : MonoBehaviour
         }
         Instance = this;
         DontDestroyOnLoad(gameObject);
-        Debug.Log("[Pool] Instance created");
     }
 
     private void Start()
@@ -33,101 +36,64 @@ public class NetworkProjectilePool : MonoBehaviour
     private void OnMatchStarted()
     {
         if (initialized) return;
-
-        Debug.Log("[Pool] Match started - initializing...");
-        Invoke(nameof(InitializePool), 0.5f);
+        Invoke(nameof(InitializePool), 0.3f);
     }
 
     private void InitializePool()
     {
         runner = FindObjectOfType<NetworkRunner>();
-
         if (runner == null)
         {
-            Debug.LogError("[Pool] Runner not found!");
             Invoke(nameof(InitializePool), 0.5f);
             return;
         }
 
         if (!runner.IsServer)
         {
-            Debug.Log("[Pool] Not server, skipping pool init");
+            Debug.Log("[Pool] Not server - pool init skipped on client");
             return;
         }
 
-        Debug.Log($"[Pool] Creating {poolSize} projectiles...");
-
+        Debug.Log($"[Pool] Creating {poolSize} projectiles on server...");
         for (int i = 0; i < poolSize; i++)
         {
-            // Spawn at origin
-            var no = runner.Spawn(
-                projectilePrefab,
-                Vector3.zero,
-                Quaternion.identity,
-                PlayerRef.None
-            );
-
+            var no = runner.Spawn(projectilePrefab, Vector3.one * 9999f, Quaternion.identity, PlayerRef.None);
             if (no != null)
             {
                 pool.Add(no);
-
-                // Disable the GameObject immediately
-                no.gameObject.SetActive(false);
-
-                Debug.Log($"[Pool] Created projectile {i + 1}/{poolSize}");
+                // Ensure projectile component is inactive (server will set IsActive=false)
+                var proj = no.GetComponent<Projectile>();
+                if (proj != null)
+                    proj.ForceDeactivateNetworked();
             }
         }
 
         initialized = true;
-        Debug.Log($"[Pool] ✓ Pool ready with {pool.Count} projectiles");
+        Debug.Log($"[Pool] Initialized {pool.Count}");
     }
 
     public NetworkObject GetPooledProjectile()
     {
         if (!initialized)
         {
-            Debug.LogError("[Pool] Not initialized!");
+            Debug.LogWarning("[Pool] Not initialized yet");
             return null;
         }
 
-        // Find first inactive projectile
         foreach (var no in pool)
         {
             if (no == null) continue;
-
-            // Check if GameObject is inactive
-            if (!no.gameObject.activeSelf)
-            {
+            var proj = no.GetComponent<Projectile>();
+            if (proj != null && !proj.IsActiveNetworked)
                 return no;
-            }
-
-            // Or check via Projectile component
-            var proj = no.GetComponent<Scripts.Gameplay.Projectile>();
-            if (proj != null && !proj.IsActive)
-            {
-                return no;
-            }
         }
 
-        Debug.LogWarning("[Pool] No inactive projectile! Increase pool size.");
+        Debug.LogWarning("[Pool] No available projectile");
         return null;
     }
 
     private void OnDestroy()
     {
         Events.OnMatchStart -= OnMatchStarted;
-    }
-
-    private void OnGUI()
-    {
-        if (!initialized) return;
-
-        int active = pool.Count(p => p != null && p.gameObject.activeSelf);
-
-        GUILayout.BeginArea(new Rect(10, 100, 200, 100));
-        GUILayout.Label($"Pool Total: {pool.Count}");
-        GUILayout.Label($"Pool Active: {active}");
-        GUILayout.Label($"Pool Available: {pool.Count - active}");
-        GUILayout.EndArea();
     }
 }

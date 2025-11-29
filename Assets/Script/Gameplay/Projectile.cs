@@ -1,187 +1,90 @@
 ﻿using Fusion;
+using Scripts.Gameplay;
 using UnityEngine;
 
-namespace Scripts.Gameplay
+/// <summary>
+/// Projectile: networked behavior. The networked flag IsActiveNetworked controls lifecycle.
+/// Movement is simulated server-side (StateAuthority).
+/// </summary>
+public class Projectile : NetworkBehaviour
 {
-    public class Projectile : NetworkBehaviour
+    [Networked] public bool IsActiveNetworked { get; set; }
+    [Networked] public PlayerRef Owner { get; set; }
+    [Networked] public Vector3 Velocity { get; set; }
+
+    public float speed = 40f;
+    public int damage = 25;
+    public float lifeSeconds = 4f;
+    private TickTimer lifeTimer;
+    public bool IsActive => IsActiveNetworked;
+
+    // Called by pool on spawn to ensure inactive on start
+    public void ForceDeactivateNetworked()
     {
-        [Networked] public bool IsActive { get; set; }
-        [Networked] public PlayerRef Owner { get; set; }
-        [Networked] public TickTimer LifeTimer { get; set; }
+        if (!Object.HasStateAuthority) return;
+        IsActiveNetworked = false;
+        Owner = PlayerRef.None;
+        Velocity = Vector3.zero;
+        lifeTimer = TickTimer.None;
+        transform.position = Vector3.one * 9999f;
+    }
 
-        public float speed = 30f;
-        public int damage = 20;
-        public float lifetime = 3f;
+    // Fire called on StateAuthority (server)
+    public void Fire(PlayerRef owner, Vector3 position, Vector3 direction)
+    {
+        if (!Object.HasStateAuthority) return;
 
-        private Rigidbody rb;
-        private MeshRenderer meshRenderer;
-        private TrailRenderer trail;
-        private SphereCollider col;
+        Owner = owner;
+        IsActiveNetworked = true;
+        lifeTimer = TickTimer.CreateFromSeconds(Runner, lifeSeconds);
+        transform.position = position;
+        Velocity = direction.normalized * speed;
+    }
 
-        public override void Spawned()
+    public override void FixedUpdateNetwork()
+    {
+        if (!Object.HasStateAuthority) return;
+
+        if (!IsActiveNetworked) return;
+
+        transform.position += Velocity * Runner.DeltaTime;
+
+        // life timeout
+        if (lifeTimer.Expired(Runner))
         {
-            // Setup Rigidbody
-            rb = GetComponent<Rigidbody>();
-            if (rb == null)
-            {
-                rb = gameObject.AddComponent<Rigidbody>();
-            }
-            rb.useGravity = false;
-            rb.isKinematic = false;
-            rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
-
-            // Setup Collider
-            col = GetComponent<SphereCollider>();
-            if (col == null)
-            {
-                col = gameObject.AddComponent<SphereCollider>();
-            }
-            col.radius = 0.1f;
-            col.isTrigger = true;
-
-            // Setup Visual
-            meshRenderer = GetComponent<MeshRenderer>();
-            if (meshRenderer == null)
-            {
-                var filter = gameObject.AddComponent<MeshFilter>();
-                filter.mesh = CreateSphereMesh();
-                meshRenderer = gameObject.AddComponent<MeshRenderer>();
-                meshRenderer.material = new Material(Shader.Find("Standard"));
-                meshRenderer.material.color = Color.yellow;
-            }
-
-            // Setup Trail
-            trail = GetComponent<TrailRenderer>();
-            if (trail == null)
-            {
-                trail = gameObject.AddComponent<TrailRenderer>();
-                trail.time = 0.2f;
-                trail.startWidth = 0.15f;
-                trail.endWidth = 0.05f;
-                trail.material = new Material(Shader.Find("Sprites/Default"));
-                trail.startColor = Color.yellow;
-                trail.endColor = Color.red;
-            }
-
-            // Start disabled
-            IsActive = false;
-            gameObject.SetActive(false);
-
-            Debug.Log("[Projectile] Spawned and disabled");
+            Deactivate();
+            return;
         }
 
-        public override void FixedUpdateNetwork()
+        // basic world bounds check
+        if (transform.position.magnitude > 2000f)
         {
-            if (!Object.HasStateAuthority) return;
-            if (!IsActive) return;
-
-            // Move forward using velocity
-            rb.linearVelocity = transform.forward * speed;
-
-            // Check lifetime
-            if (LifeTimer.Expired(Runner))
-            {
-                Deactivate();
-            }
+            Deactivate();
+            return;
         }
 
-        public void Fire(PlayerRef owner, Vector3 startPos, Vector3 direction)
+        // simple hit detection - cast a small sphere forward
+        var hit = Physics.SphereCast(transform.position - (Velocity.normalized * 0.1f), 0.12f, Velocity.normalized, out RaycastHit rh, Velocity.magnitude * Runner.DeltaTime);
+        if (hit)
         {
-            if (!Runner.IsServer)
+            var hitObj = rh.collider.GetComponentInParent<NetworkObject>();
+            if (hitObj != null)
             {
-                Debug.LogError("[Projectile] Fire called on non-server!");
-                return;
-            }
-
-            // Set networked properties
-            Owner = owner;
-            IsActive = true;
-            LifeTimer = TickTimer.CreateFromSeconds(Runner, lifetime);
-
-            // Set position and rotation
-            transform.position = startPos;
-            transform.forward = direction.normalized;
-
-            // Enable GameObject
-            gameObject.SetActive(true);
-
-            // Reset physics
-            rb.linearVelocity = direction.normalized * speed;
-            rb.angularVelocity = Vector3.zero;
-
-            // Enable visuals
-            if (meshRenderer != null) meshRenderer.enabled = true;
-            if (col != null) col.enabled = true;
-            if (trail != null)
-            {
-                trail.enabled = true;
-                trail.Clear();
-            }
-
-            Debug.Log($"[Projectile] ✓ Fired from {startPos} direction {direction}");
-        }
-
-        private void Deactivate()
-        {
-            if (!Runner.IsServer) return;
-
-            IsActive = false;
-            Owner = PlayerRef.None;
-
-            // Disable GameObject
-            gameObject.SetActive(false);
-
-            // Stop physics
-            rb.linearVelocity = Vector3.zero;
-            rb.angularVelocity = Vector3.zero;
-
-            // Disable visuals
-            if (meshRenderer != null) meshRenderer.enabled = false;
-            if (col != null) col.enabled = false;
-            if (trail != null)
-            {
-                trail.enabled = false;
-                trail.Clear();
-            }
-
-            Debug.Log("[Projectile] Deactivated");
-        }
-
-        private void OnTriggerEnter(Collider other)
-        {
-            if (!Runner.IsServer) return;
-            if (!IsActive) return;
-
-            Debug.Log($"[Projectile] Hit: {other.gameObject.name}");
-
-            // Check if hit a player
-            var pc = other.GetComponent<PlayerController>();
-            if (pc != null)
-            {
-                if (pc.Object.InputAuthority != Owner)
+                var pc = hitObj.GetComponent<PlayerController>();
+                if (pc != null)
                 {
-                    Debug.Log($"[Projectile] ✓ Damaged player: {pc.PlayerName}");
+                    // Apply damage on state authority via RPC so all clients update
                     pc.RPC_TakeDamage(damage, Owner);
-                    Deactivate();
                 }
-                return;
             }
 
-            // Check environment
-            if (other.CompareTag("Environment") || other.gameObject.layer == 0)
-            {
-                Debug.Log("[Projectile] Hit environment");
-                Deactivate();
-            }
+            Deactivate();
         }
+    }
 
-        private Mesh CreateSphereMesh()
-        {
-            GameObject temp = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            temp.transform.localScale = Vector3.one * 0.2f;
-            Mesh mesh = temp.GetComponent<MeshFilter>().mesh;
-            Destroy(temp);
-            return mesh;
-        }
+    private void Deactivate()
+    {
+        if (!Object.HasStateAuthority) return;
+        ForceDeactivateNetworked();
     }
 }

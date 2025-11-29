@@ -1,11 +1,11 @@
 ﻿using Fusion;
 using Fusion.Sockets;
-using System.Collections.Generic;
-using System.Linq;
-using UnityEngine;
 using Scripts.Gameplay;
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
+using UnityEngine;
 
 public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
 {
@@ -15,7 +15,7 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
     public NetworkPrefabRef playerPrefab;
     public Transform[] spawnPoints;
 
-    private const string GLOBAL_SESSION_NAME = "GLOBAL_ROOM";
+    private const string GLOBAL_SESSION_NAME = "GLOBAL_MULTIPLAYER_ROOM";
     private bool isConnecting = false;
     private int connectionAttempts = 0;
     private const int MAX_CONNECTION_ATTEMPTS = 3;
@@ -40,159 +40,172 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
         Events.OnLeaveClicked -= OnLeaveClicked;
 
         if (runner != null)
-        {
             runner.RemoveCallbacks(this);
-        }
     }
 
-    private void OnHostClicked() => StartRunner(true);
-    private void OnQuickJoinClicked() => StartRunner(false);
+    private void OnHostClicked() => StartRunnerAsHost();
+    private void OnQuickJoinClicked() => StartRunnerQuickJoin();
 
-    private async void StartRunner(bool makeHost)
+    // Create a new session as Host
+    public void StartRunnerAsHost()
+    {
+        if (isConnecting) return;
+        Debug.Log("[NetworkManager] Starting as explicit Host");
+        StartRunner(GameMode.Host);
+    }
+
+    // Try to join existing session, or create new one if none available
+    public void StartRunnerQuickJoin()
+    {
+        if (isConnecting) return;
+        Debug.Log("[NetworkManager] Starting Quick Join (AutoHostOrClient)");
+        StartRunner(GameMode.AutoHostOrClient);
+    }
+
+    private async void StartRunner(GameMode mode)
     {
         if (isConnecting)
         {
-            Debug.LogWarning("[NetworkManager] Already connecting!");
             Events.RaiseSetStatusText("Already connecting...");
             return;
         }
 
         if (runner != null)
         {
-            Debug.LogWarning("[NetworkManager] Runner already exists!");
-            Events.RaiseSetStatusText("Already in session");
+            Events.RaiseSetStatusText("Already connected");
             return;
         }
 
         isConnecting = true;
         connectionAttempts = 0;
 
-        bool success = await TryConnect(makeHost);
-
-        if (!success)
-        {
-            Events.RaiseSetStatusText("Connection failed. Try again.");
-            isConnecting = false;
-        }
-    }
-
-    private async Task<bool> TryConnect(bool makeHost)
-    {
         while (connectionAttempts < MAX_CONNECTION_ATTEMPTS)
         {
             connectionAttempts++;
-            string mode = makeHost ? "Host" : "Client";
-            Events.RaiseSetStatusText($"{mode} connecting... ({connectionAttempts}/{MAX_CONNECTION_ATTEMPTS})");
-            Debug.Log($"[NetworkManager] Attempt {connectionAttempts}: Starting as {mode}");
+            Events.RaiseSetStatusText($"Connecting... ({connectionAttempts}/{MAX_CONNECTION_ATTEMPTS})");
+            Debug.Log($"[NetworkManager] Connection attempt {connectionAttempts} - Mode: {mode}");
 
             try
             {
-                // Create runner
+                // Create runner instance
                 runner = Instantiate(runnerPrefab);
                 runner.name = "NetworkRunner";
                 runner.ProvideInput = true;
                 runner.AddCallbacks(this);
 
-                // Configure start arguments
+                var sceneManager = runner.gameObject.AddComponent<NetworkSceneManagerDefault>();
+
                 var args = new StartGameArgs()
                 {
-                    GameMode = makeHost ? GameMode.Host : GameMode.Client,
+                    GameMode = mode,
                     SessionName = GLOBAL_SESSION_NAME,
-                    SceneManager = gameObject.AddComponent<NetworkSceneManagerDefault>(),
-                    PlayerCount = 4, // Max 4 players
+                    PlayerCount = 16,
+                    SceneManager = sceneManager,
+                    // Add session properties for better matchmaking
+                    SessionProperties = new Dictionary<string, SessionProperty>
+                    {
+                        { "GameType", "Arena" },
+                        { "Version", "1.0" }
+                    }
                 };
 
-                Debug.Log($"[NetworkManager] Starting game session: {GLOBAL_SESSION_NAME}");
+                Debug.Log($"[NetworkManager] Starting game with mode: {mode}, session: {GLOBAL_SESSION_NAME}");
 
-                var result = await runner.StartGame(args);
+                var startResult = await runner.StartGame(args);
 
-                if (result.Ok)
+                if (startResult.Ok)
                 {
-                    Debug.Log($"[NetworkManager] ✓ Connected successfully as {mode}");
-                    Events.RaiseSetStatusText($"Connected as {mode}");
+                    string roleText = runner.IsServer ? "Host/Server" : "Client";
+                    Debug.Log($"[NetworkManager] ✓ Started as {roleText}");
+                    Events.RaiseSetStatusText($"Connected as {roleText}");
                     isConnecting = false;
-                    return true;
+                    Events.RaiseShowMenu(false);
+                    return;
                 }
                 else
                 {
-                    Debug.LogError($"[NetworkManager] Connection failed: {result.ShutdownReason}");
-                    Events.RaiseSetStatusText($"Failed: {result.ShutdownReason}");
-
-                    // Cleanup
-                    if (runner != null)
-                    {
-                        runner.RemoveCallbacks(this);
-                        Destroy(runner.gameObject);
-                        runner = null;
-                    }
-
-                    // If host creation failed, try joining as client
-                    if (makeHost && connectionAttempts < MAX_CONNECTION_ATTEMPTS)
-                    {
-                        Debug.Log("[NetworkManager] Host creation failed, trying to join as client...");
-                        await Task.Delay(1000);
-                        makeHost = false;
-                        continue;
-                    }
-
-                    // Wait before retry
-                    if (connectionAttempts < MAX_CONNECTION_ATTEMPTS)
-                    {
-                        await Task.Delay(2000);
-                    }
+                    Debug.LogError($"[NetworkManager] Start failed: {startResult.ShutdownReason}");
+                    Events.RaiseSetStatusText($"Failed: {startResult.ShutdownReason}");
+                    CleanupRunner();
+                    await Task.Delay(1000);
                 }
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[NetworkManager] Exception during connection: {ex.Message}");
+                Debug.LogError($"[NetworkManager] Exception: {ex.Message}\n{ex.StackTrace}");
                 Events.RaiseSetStatusText($"Error: {ex.Message}");
-
-                if (runner != null)
-                {
-                    runner.RemoveCallbacks(this);
-                    Destroy(runner.gameObject);
-                    runner = null;
-                }
-
-                if (connectionAttempts < MAX_CONNECTION_ATTEMPTS)
-                {
-                    await Task.Delay(2000);
-                }
+                CleanupRunner();
+                await Task.Delay(1000);
             }
         }
 
-        Debug.LogError("[NetworkManager] All connection attempts failed");
-        Events.RaiseSetStatusText("Connection failed after 3 attempts");
-        return false;
+        Events.RaiseSetStatusText("Connection failed after retries");
+        isConnecting = false;
+
+        // Show retry option
+        Events.RaiseShowMenu(true);
+    }
+
+    private void CleanupRunner()
+    {
+        if (runner != null)
+        {
+            runner.RemoveCallbacks(this);
+            if (runner.gameObject != null)
+                Destroy(runner.gameObject);
+            runner = null;
+        }
     }
 
     private void OnRestartClicked()
     {
-        Debug.Log("[NetworkManager] Restarting game...");
+        Debug.Log("[NetworkManager] Restart requested");
 
-        if (runner != null)
+        if (runner != null && runner.IsServer)
         {
-            runner.Shutdown();
-        }
+            // Server/Host restarts the match
+            Events.RaiseMatchStart();
 
-        UnityEngine.SceneManagement.SceneManager.LoadScene(
-            UnityEngine.SceneManagement.SceneManager.GetActiveScene().buildIndex
-        );
+            // Reset all players
+            var players = FindObjectsOfType<PlayerController>();
+            foreach (var p in players)
+            {
+                if (p.Object != null && p.Object.HasStateAuthority)
+                {
+                    // Reset stats
+                    p.Kills = 0;
+                    p.Deaths = 0;
+                    p.Health = p.maxHealth;
+                    p.RPC_BroadcastScore(p.PlayerName, 0);
+                }
+            }
+
+            Events.RaiseSetStatusText("Match restarted!");
+            Events.RaiseShowMenu(false);
+        }
+        else
+        {
+            // Client requests restart via RPC (you can implement this)
+            Debug.Log("[NetworkManager] Client requesting restart...");
+            Events.RaiseSetStatusText("Restart requested...");
+        }
     }
 
     private void OnLeaveClicked()
     {
-        Debug.Log("[NetworkManager] Leaving session...");
+        Debug.Log("[NetworkManager] Leave clicked");
 
         if (runner != null)
         {
             runner.Shutdown();
         }
 
+        CleanupRunner();
         Events.RaiseShowMenu(true);
         Events.RaiseSetStatusText("Disconnected");
     }
 
+    // Input forwarding to network
     public void OnInput(NetworkRunner runnerRef, NetworkInput input)
     {
         var im = InputManager.Instance;
@@ -210,40 +223,49 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
 
     public void OnPlayerJoined(NetworkRunner runnerRef, PlayerRef player)
     {
-        Debug.Log($"[NetworkManager] Player {player.PlayerId} joined");
+        Debug.Log($"[NetworkManager] Player {player.PlayerId} joined (IsServer: {runnerRef.IsServer})");
 
-        Events.RaiseSetStatusText($"Player joined ({runnerRef.ActivePlayers.Count()})");
-
+        // Spawn player only on server/state authority
         if (runnerRef.IsServer)
         {
-            // Spawn player
             Vector3 pos = Vector3.zero;
             Quaternion rot = Quaternion.identity;
 
+            // Get spawn point
             if (spawnPoints != null && spawnPoints.Length > 0)
             {
                 var sp = spawnPoints[UnityEngine.Random.Range(0, spawnPoints.Length)];
                 pos = sp.position;
-                rot = sp.rotation;
+
+                // Calculate rotation to face center
+                Vector3 dirToCenter = (Vector3.zero - pos);
+                dirToCenter.y = 0;
+                if (dirToCenter.sqrMagnitude > 0.001f)
+                    rot = Quaternion.LookRotation(dirToCenter.normalized, Vector3.up);
+                else
+                    rot = sp.rotation;
             }
 
             var playerObj = runnerRef.Spawn(playerPrefab, pos, rot, player);
             Debug.Log($"[NetworkManager] ✓ Spawned player {player.PlayerId} at {pos}");
 
-            // Start match when 2+ players
+            // Start match when 2+ players present
             if (runnerRef.ActivePlayers.Count() >= 2)
             {
-                Debug.Log("[NetworkManager] 2+ players - starting match!");
+                Debug.Log("[NetworkManager] 2+ players detected - starting match");
                 Events.RaiseMatchStart();
             }
         }
+
+        Events.RaiseSetStatusText($"Players: {runnerRef.ActivePlayers.Count()}");
     }
 
     public void OnPlayerLeft(NetworkRunner runnerRef, PlayerRef player)
     {
         Debug.Log($"[NetworkManager] Player {player.PlayerId} left");
-        Events.RaiseSetStatusText($"Player left ({runnerRef.ActivePlayers.Count()})");
+        Events.RaiseSetStatusText($"Players: {runnerRef.ActivePlayers.Count()}");
 
+        // End match if less than 2 players
         if (runnerRef.ActivePlayers.Count() < 2)
         {
             Debug.Log("[NetworkManager] Less than 2 players - ending match");
@@ -254,18 +276,10 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
     public void OnShutdown(NetworkRunner runnerRef, ShutdownReason shutdownReason)
     {
         Debug.Log($"[NetworkManager] Shutdown: {shutdownReason}");
-        Events.RaiseSetStatusText($"Session ended: {shutdownReason}");
+        CleanupRunner();
         Events.RaiseShowMenu(true);
-
+        Events.RaiseSetStatusText($"Disconnected: {shutdownReason}");
         isConnecting = false;
-        connectionAttempts = 0;
-
-        if (runner != null)
-        {
-            runner.RemoveCallbacks(this);
-            Destroy(runner.gameObject);
-            runner = null;
-        }
     }
 
     public void OnConnectedToServer(NetworkRunner runner)
@@ -276,18 +290,19 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
 
     public void OnConnectFailed(NetworkRunner runner, NetAddress remoteAddress, NetConnectFailedReason reason)
     {
-        Debug.LogError($"[NetworkManager] Connection failed: {reason}");
+        Debug.LogError($"[NetworkManager] Connect failed: {reason}");
         Events.RaiseSetStatusText($"Connection failed: {reason}");
         isConnecting = false;
     }
 
     public void OnDisconnectedFromServer(NetworkRunner runner, NetDisconnectReason reason)
     {
-        Debug.LogError($"[NetworkManager] Disconnected: {reason}");
+        Debug.LogWarning($"[NetworkManager] Disconnected from server: {reason}");
         Events.RaiseSetStatusText($"Disconnected: {reason}");
+        isConnecting = false;
     }
 
-    // Empty implementations
+    // Unused callbacks
     public void OnConnectRequest(NetworkRunner runner, NetworkRunnerCallbackArgs.ConnectRequest request, byte[] token) { }
     public void OnUserSimulationMessage(NetworkRunner runner, SimulationMessagePtr message) { }
     public void OnSessionListUpdated(NetworkRunner runner, List<SessionInfo> sessionList) { }
@@ -297,11 +312,13 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
     public void OnReliableDataProgress(NetworkRunner runner, PlayerRef player, ReliableKey key, float progress) { }
     public void OnSceneLoadDone(NetworkRunner runner) { }
     public void OnSceneLoadStart(NetworkRunner runner) { }
+    public void OnInputMissing(NetworkRunner runner, PlayerRef player, NetworkInput input) { }
+    public void OnObjectExitAOI(NetworkRunner runner, NetworkObject obj, PlayerRef player) { }
+    public void OnObjectEnterAOI(NetworkRunner runner, NetworkObject obj, PlayerRef player) { }
+
+    // These are handled by OnPlayerJoined/OnPlayerLeft
     public void OnPlayerConnected(NetworkRunner runner, PlayerRef player) { }
     public void OnPlayerDisconnected(NetworkRunner runner, PlayerRef player) { }
     public void OnObjectSpawned(NetworkRunner runner, NetworkObject obj) { }
     public void OnObjectDestroyed(NetworkRunner runner, NetworkObject obj) { }
-    public void OnInputMissing(NetworkRunner runner, PlayerRef player, NetworkInput input) { }
-    public void OnObjectExitAOI(NetworkRunner runner, NetworkObject obj, PlayerRef player) { }
-    public void OnObjectEnterAOI(NetworkRunner runner, NetworkObject obj, PlayerRef player) { }
 }
