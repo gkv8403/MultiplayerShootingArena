@@ -12,13 +12,32 @@ public class CameraController : MonoBehaviour
     public float raycastDistance = 100f;
     public Image crosshair;
 
+    [Header("Crosshair Settings")]
+    public Vector2 crosshairOffset = Vector2.zero; // Offset from center if needed
+    public Color crosshairNormalColor = Color.white;
+    public Color crosshairTargetColor = Color.red;
+
     private Camera mainCam;
     private Scripts.Gameplay.PlayerController localPlayer;
     private bool targetAssigned = false;
+    private RectTransform crosshairRect;
 
     private void Start()
     {
         mainCam = GetComponent<Camera>() ?? Camera.main;
+
+        if (crosshair != null)
+        {
+            crosshairRect = crosshair.GetComponent<RectTransform>();
+            // Center crosshair on screen
+            if (crosshairRect != null)
+            {
+                crosshairRect.anchorMin = new Vector2(0.5f, 0.5f);
+                crosshairRect.anchorMax = new Vector2(0.5f, 0.5f);
+                crosshairRect.pivot = new Vector2(0.5f, 0.5f);
+                crosshairRect.anchoredPosition = crosshairOffset;
+            }
+        }
     }
 
     private void LateUpdate()
@@ -32,7 +51,7 @@ public class CameraController : MonoBehaviour
 
         if (target == null) return;
 
-        // follow (basic third-person camera)
+        // Follow target (third-person camera)
         Vector3 desiredPos = target.position - target.forward * distance + Vector3.up * height;
         transform.position = Vector3.Lerp(transform.position, desiredPos, smoothSpeed * Time.deltaTime);
         transform.LookAt(target.position + Vector3.up * 1.5f);
@@ -45,13 +64,19 @@ public class CameraController : MonoBehaviour
         var allPlayers = FindObjectsOfType<Scripts.Gameplay.PlayerController>();
         foreach (var p in allPlayers)
         {
-            if (p.Object.HasInputAuthority)
+            if (p.Object != null && p.Object.HasInputAuthority)
             {
                 target = p.transform;
                 localPlayer = p;
                 firePoint = p.firePoint;
+                Debug.Log($"[Camera] Found local player: {p.PlayerName}");
                 break;
             }
+        }
+
+        if (target == null)
+        {
+            Debug.LogWarning("[Camera] No local player found yet");
         }
     }
 
@@ -59,15 +84,44 @@ public class CameraController : MonoBehaviour
     {
         if (crosshair == null || mainCam == null) return;
 
-        Ray ray = mainCam.ScreenPointToRay(new Vector3(Screen.width / 2f, Screen.height / 2f, 0f));
+        // Raycast from camera center (where bullets will go)
+        Ray ray = mainCam.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
+
+        // Check if aiming at a player
+        bool hitPlayer = false;
         if (Physics.Raycast(ray, out RaycastHit hit, raycastDistance))
         {
-            crosshair.rectTransform.anchoredPosition = Vector2.zero; // keep centered for center-screen crosshair
-            crosshair.color = Color.red;
+            // Check if hit a player (but not ourselves)
+            var hitPlayerController = hit.collider.GetComponentInParent<Scripts.Gameplay.PlayerController>();
+            if (hitPlayerController != null && hitPlayerController != localPlayer)
+            {
+                hitPlayer = true;
+            }
         }
-        else
+
+        // Update crosshair color based on target
+        crosshair.color = hitPlayer ? crosshairTargetColor : crosshairNormalColor;
+
+        // Optional: Scale crosshair slightly when over target
+        if (crosshairRect != null)
         {
-            crosshair.color = Color.white;
+            float targetScale = hitPlayer ? 1.2f : 1f;
+            crosshairRect.localScale = Vector3.Lerp(
+                crosshairRect.localScale,
+                Vector3.one * targetScale,
+                10f * Time.deltaTime
+            );
         }
+    }
+
+    // Debug helper
+    private void OnDrawGizmos()
+    {
+        if (mainCam == null) return;
+
+        // Draw ray from camera center
+        Ray ray = mainCam.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
+        Gizmos.color = Color.yellow;
+        Gizmos.DrawRay(ray.origin, ray.direction * raycastDistance);
     }
 }

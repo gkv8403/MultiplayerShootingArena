@@ -2,6 +2,8 @@
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
+using System.Collections.Generic;
+using System.Linq;
 
 public class UIManager : MonoBehaviour
 {
@@ -20,9 +22,10 @@ public class UIManager : MonoBehaviour
     public Button restartButton;
     public Button leaveButton;
     public TMP_Text gameOverText;
+    public TMP_Text playerCountText; // NEW: Shows player count for host
 
     [Header("Score")]
-    public TMP_Text scoreText;
+    public TMP_Text scoreText; // Shows all players' scores in one text
 
     [Header("Touch Controls")]
     public Button moveUp, moveDown, moveLeft, moveRight;
@@ -30,17 +33,18 @@ public class UIManager : MonoBehaviour
     public RectTransform lookArea;
     public Image crosshair;
 
+    // Track all player scores
+    private Dictionary<string, int> playerScores = new Dictionary<string, int>();
+    private bool isHost = false;
+
     private void Awake()
     {
-        // Start with menu visible
         ShowMenuState();
-
         SetupMenuButtons();
         SetupMovementButtons();
         SetupFireButton();
         SetupLookArea();
 
-        // Subscribe to events
         Events.OnSetStatusText += SetStatusText;
         Events.OnShowMenu += ShowMenu;
         Events.OnShowGameOver += ShowGameOver;
@@ -64,6 +68,7 @@ public class UIManager : MonoBehaviour
             hostButton.onClick.AddListener(() => {
                 Debug.Log("[UIManager] Host clicked");
                 SetButtonsInteractable(false);
+                isHost = true; // Track host status
                 Events.RaiseHostClicked();
             });
         }
@@ -73,6 +78,7 @@ public class UIManager : MonoBehaviour
             quickJoinButton.onClick.AddListener(() => {
                 Debug.Log("[UIManager] QuickJoin clicked");
                 SetButtonsInteractable(false);
+                isHost = false; // Not host if joining
                 Events.RaiseQuickJoinClicked();
             });
         }
@@ -169,31 +175,29 @@ public class UIManager : MonoBehaviour
 
     private void ShowMenuState()
     {
-        // Show ONLY menu panel
         SetActive(joinPanel, true);
         SetActive(scorePanel, false);
         SetActive(controllerPanel, false);
         SetActive(gameOverPanel, false);
 
         SetButtonsInteractable(true);
+        playerScores.Clear();
+        UpdateScoreDisplay();
 
         Debug.Log("[UIManager] ✓ Menu state active");
     }
 
     private void ShowGameplayState()
     {
-        // Hide menu, show gameplay UI
         SetActive(joinPanel, false);
         SetActive(scorePanel, true);
         SetActive(gameOverPanel, false);
 
-        // Show controls based on input mode
         bool isMobile = InputManager.Instance != null && !InputManager.Instance.useKeyboardMouse;
         SetActive(controllerPanel, isMobile);
 
-        // Initialize score
         if (scoreText != null)
-            scoreText.text = "Waiting for match...";
+            scoreText.text = "Match starting...";
 
         Debug.Log($"[UIManager] ✓ Gameplay state (Controls: {isMobile})");
     }
@@ -202,25 +206,82 @@ public class UIManager : MonoBehaviour
     {
         Debug.Log("[UIManager] ShowGameOver called");
 
-        // Show game over panel, keep score visible
         SetActive(gameOverPanel, true);
         SetActive(scorePanel, true);
         SetActive(controllerPanel, false);
         SetActive(joinPanel, false);
 
-        if (gameOverText != null)
-            gameOverText.text = "Game Over!";
+        // Different UI for host vs client
+        if (isHost)
+        {
+            if (gameOverText != null)
+                gameOverText.text = "Match Over!\n(You are Host)";
+
+            if (restartButton != null)
+                restartButton.gameObject.SetActive(true);
+
+            if (playerCountText != null)
+            {
+                int playerCount = FindObjectsOfType<Scripts.Gameplay.PlayerController>().Length;
+                playerCountText.gameObject.SetActive(true);
+                playerCountText.text = $"Players: {playerCount}";
+            }
+        }
+        else
+        {
+            if (gameOverText != null)
+                gameOverText.text = "Match Over!";
+
+            if (restartButton != null)
+            {
+                restartButton.gameObject.SetActive(true);
+                // Change text for client
+                var buttonText = restartButton.GetComponentInChildren<TMP_Text>();
+                if (buttonText != null)
+                    buttonText.text = "Request Restart";
+            }
+
+            if (playerCountText != null)
+                playerCountText.gameObject.SetActive(false);
+        }
 
         Debug.Log("[UIManager] ✓ Game over state");
     }
 
     private void UpdateScoreText(string playerName, int kills)
     {
-        if (scoreText != null)
+        // Update player's score in dictionary
+        playerScores[playerName] = kills;
+
+        // Rebuild score display
+        UpdateScoreDisplay();
+
+        Debug.Log($"[UIManager] ✓ Score updated: {playerName} - {kills}");
+    }
+
+    private void UpdateScoreDisplay()
+    {
+        if (scoreText == null) return;
+
+        if (playerScores.Count == 0)
         {
-            scoreText.text = $"{playerName}: {kills} kills";
-            Debug.Log($"[UIManager] ✓ Score updated: {playerName} - {kills}");
+            scoreText.text = "Waiting for players...";
+            return;
         }
+
+        // Sort players by kills (descending)
+        var sortedPlayers = playerScores.OrderByDescending(x => x.Value);
+
+        // Build score text
+        string scoreDisplay = "=== SCOREBOARD ===\n";
+        int rank = 1;
+        foreach (var player in sortedPlayers)
+        {
+            scoreDisplay += $"{rank}. {player.Key}: {player.Value} kills\n";
+            rank++;
+        }
+
+        scoreText.text = scoreDisplay;
     }
 
     private void SetButtonsInteractable(bool interactable)
