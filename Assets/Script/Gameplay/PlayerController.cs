@@ -49,6 +49,7 @@ namespace Scripts.Gameplay
         private Vector3 lastSyncedPosition;
         private Quaternion lastSyncedRotation;
         private float lastSyncTime;
+        private int lastBroadcastedKills = -1;
 
         public override void Spawned()
         {
@@ -133,9 +134,8 @@ namespace Scripts.Gameplay
                 NetPosition = transform.position;
                 NetRotation = transform.rotation;
 
-                // FIX: Broadcast initial score immediately
-                Debug.Log($"[Player] Broadcasting initial score for {PlayerName}");
-                RPC_BroadcastScore(PlayerName, Kills);
+                lastBroadcastedKills = 0;
+                Invoke(nameof(BroadcastInitialScore), 0.5f);
             }
 
             lastSyncedPosition = transform.position;
@@ -149,6 +149,15 @@ namespace Scripts.Gameplay
                 healthBar.fillAmount = 1f;
 
             Debug.Log($"[Player] ===== SPAWN COMPLETE =====");
+        }
+
+        private void BroadcastInitialScore()
+        {
+            if (Object.HasStateAuthority)
+            {
+                Debug.Log($"[Player] 📊 Broadcasting initial score for {PlayerName}");
+                RPC_BroadcastScore(PlayerName, Kills);
+            }
         }
 
         public override void FixedUpdateNetwork()
@@ -257,6 +266,10 @@ namespace Scripts.Gameplay
             if (headTransform != null)
                 headTransform.localRotation = Quaternion.Euler(VerticalRotation, 0, 0);
 
+            // Update health bar continuously
+            if (healthBar != null)
+                healthBar.fillAmount = (float)Health / maxHealth;
+
             if (Object.HasInputAuthority && IsDead && respawnCountdownText != null)
             {
                 float timeLeft = RespawnTimer.RemainingTime(Runner) ?? 0f;
@@ -279,21 +292,21 @@ namespace Scripts.Gameplay
             var pool = NetworkProjectilePool.Instance;
             if (pool == null)
             {
-                Debug.LogWarning("[Player] Pool not found");
+                Debug.LogWarning("[Player] ⚠️ Pool not found");
                 return;
             }
 
             var no = pool.GetPooledProjectile();
             if (no == null)
             {
-                Debug.LogWarning("[Player] No projectile available");
+                Debug.LogWarning("[Player] ⚠️ No projectile available");
                 return;
             }
 
             var proj = no.GetComponent<Projectile>();
             if (proj != null)
             {
-                Debug.Log($"[Player] {PlayerName} firing projectile from {position} dir {direction}");
+                Debug.Log($"[Player] 🔫 {PlayerName} firing projectile from {position} dir {direction}");
                 proj.Fire(Object.InputAuthority, position, direction);
                 RPC_OnFireVisual();
             }
@@ -302,60 +315,90 @@ namespace Scripts.Gameplay
         [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
         private void RPC_OnFireVisual()
         {
-            Debug.Log($"[Player] Fire visual for {PlayerName}");
+            Debug.Log($"[Player] 🎬 Fire visual for {PlayerName}");
         }
 
-        [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
-        public void RPC_TakeDamage(int dmg, PlayerRef attacker)
+        // ✅ SERVER-SIDE ONLY damage method called directly by Projectile
+        public void ApplyDamageServerSide(int dmg, PlayerRef attacker)
         {
-            Debug.Log($"[Player] RPC_TakeDamage called on {PlayerName}, IsDead={IsDead}, Health={Health}");
+            // CRITICAL: This MUST only be called on server
+            if (!Object.HasStateAuthority)
+            {
+                Debug.LogError($"[Player] ❌❌❌ ApplyDamageServerSide called on CLIENT! This is wrong!");
+                return;
+            }
 
-            if (IsDead) return;
+            if (IsDead)
+            {
+                Debug.Log($"[Player] ⚠️ {PlayerName} already dead");
+                return;
+            }
+
+            Debug.Log($"[Player] 💥💥💥 SERVER: {PlayerName} taking {dmg} damage from {attacker}");
 
             Health -= dmg;
 
-            if (healthBar != null)
-                healthBar.fillAmount = (float)Health / maxHealth;
+            // Sync health to all clients
+            RPC_UpdateHealthVisual(Health);
 
-            Debug.Log($"[Player] {PlayerName} took {dmg} damage. Health now: {Health}");
+            Debug.Log($"[Player] ❤️ SERVER: {PlayerName} health now {Health}/{maxHealth}");
 
-            // FIX: Only server handles death logic
-            if (Health <= 0 && Object.HasStateAuthority)
+            if (Health <= 0)
             {
                 Health = 0;
                 IsDead = true;
                 Deaths++;
 
-                Debug.Log($"[Player] {PlayerName} DIED! Deaths: {Deaths}");
+                Debug.Log($"[Player] 💀💀💀 SERVER: {PlayerName} DIED!");
 
-                RPC_SetVisible(false);
-
-                // FIX: Award kill to attacker
-                if (Runner.TryGetPlayerObject(attacker, out NetworkObject attackerObj))
+                // Award kill
+                if (attacker != PlayerRef.None && Runner.TryGetPlayerObject(attacker, out NetworkObject attackerObj))
                 {
                     var attackerPC = attackerObj.GetComponent<PlayerController>();
                     if (attackerPC != null && attackerPC != this)
                     {
                         attackerPC.Kills++;
-                        Debug.Log($"[Player] {attackerPC.PlayerName} got a KILL! Total kills: {attackerPC.Kills}");
+                        int newKills = attackerPC.Kills;
 
-                        // FIX: Broadcast score update immediately
-                        attackerPC.RPC_BroadcastScore(attackerPC.PlayerName, attackerPC.Kills);
+                        Debug.Log($"[Player] 🎉🏆🎉 SERVER: {attackerPC.PlayerName} GOT KILL #{newKills}!");
+
+                        // Broadcast score immediately
+                        if (attackerPC.lastBroadcastedKills != newKills)
+                        {
+                            attackerPC.lastBroadcastedKills = newKills;
+                            attackerPC.RPC_BroadcastScore(attackerPC.PlayerName, newKills);
+                            Events.RaiseUpdateScore(attackerPC.PlayerName.ToString(), newKills);
+
+                            Debug.Log($"[Player] 📢📢📢 Broadcasted score: {attackerPC.PlayerName} = {newKills}");
+                        }
                     }
                 }
 
-                RespawnTimer = TickTimer.CreateFromSeconds(Runner, 2f);
+                RPC_OnPlayerDied();
+                RespawnTimer = TickTimer.CreateFromSeconds(Runner, 3f);
             }
         }
 
-        // FIX: Simplified score broadcast - just raise event
+        [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
+        private void RPC_UpdateHealthVisual(int newHealth)
+        {
+            Health = newHealth;
+            if (healthBar != null)
+                healthBar.fillAmount = (float)Health / maxHealth;
+        }
+
+        [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
+        private void RPC_OnPlayerDied()
+        {
+            Debug.Log($"[Player] 💀 CLIENT: {PlayerName} died (visual)");
+            RPC_SetVisible(false);
+        }
+
         [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
         public void RPC_BroadcastScore(NetworkString<_16> pName, int kills)
         {
             string playerNameStr = pName.ToString();
-            Debug.Log($"[Player] RPC_BroadcastScore received: {playerNameStr} - {kills} kills");
-
-            // Raise event so UI and GameManager can update
+            Debug.Log($"[Player] 📊 RPC_BroadcastScore: {playerNameStr} = {kills}");
             Events.RaiseUpdateScore(playerNameStr, kills);
         }
 
@@ -386,14 +429,14 @@ namespace Scripts.Gameplay
             if (playerCanvas != null)
                 playerCanvas.enabled = visible;
 
-            Debug.Log($"[Player] {PlayerName} visibility set to {visible}");
+            Debug.Log($"[Player] 👁️ {PlayerName} visibility: {visible}");
         }
 
         private void Respawn()
         {
             if (!Object.HasStateAuthority) return;
 
-            Debug.Log($"[Player] Respawning {PlayerName}");
+            Debug.Log($"[Player] ♻️ Respawning {PlayerName}");
 
             Health = maxHealth;
             IsDead = false;
@@ -447,7 +490,7 @@ namespace Scripts.Gameplay
             if (Object.HasStateAuthority)
             {
                 CombatEnabled = enable;
-                Debug.Log($"[Player] {PlayerName} combat enabled: {enable}");
+                Debug.Log($"[Player] ⚔️ {PlayerName} combat: {enable}");
             }
         }
 
@@ -457,20 +500,16 @@ namespace Scripts.Gameplay
                 respawnCountdownText.gameObject.SetActive(false);
         }
 
-        // Debug stats
         private void OnGUI()
         {
             if (!Object.HasStateAuthority || !Debug.isDebugBuild) return;
 
             GUI.color = Color.green;
-            float timeSinceSync = Time.time - lastSyncTime;
-            float distToSyncPos = Vector3.Distance(transform.position, lastSyncedPosition);
-
-            GUILayout.BeginArea(new Rect(Screen.width - 300, 10, 290, 120));
+            GUILayout.BeginArea(new Rect(Screen.width - 300, 10, 290, 140));
             GUILayout.Label($"[{PlayerName}]");
             GUILayout.Label($"Kills: {Kills} | Deaths: {Deaths}");
-            GUILayout.Label($"Time since sync: {timeSinceSync:F3}s");
-            GUILayout.Label($"Distance: {distToSyncPos:F3}m");
+            GUILayout.Label($"Health: {Health}/{maxHealth}");
+            GUILayout.Label($"Combat: {CombatEnabled}");
             GUILayout.EndArea();
         }
     }

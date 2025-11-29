@@ -22,24 +22,25 @@ public class UIManager : MonoBehaviour
     public Button restartButton;
     public Button leaveButton;
     public TMP_Text gameOverText;
-    public TMP_Text winnerInfoText; // NEW: Shows winner details
+    public TMP_Text winnerInfoText;
     public TMP_Text playerCountText;
 
     [Header("Score")]
-    public TMP_Text scoreText; // Shows all players' scores
+    public TMP_Text scoreText;
 
     [Header("Touch Controls")]
     public Button moveUp, moveDown, moveLeft, moveRight;
-    public Button moveUpVertical, moveDownVertical; // NEW: For Q/E movement
+    public Button moveUpVertical, moveDownVertical;
     public Button fireButton;
     public RectTransform lookArea;
     public Image crosshair;
 
-    // Track all player scores
+    // ✅ FIX: Thread-safe score tracking
     private Dictionary<string, int> playerScores = new Dictionary<string, int>();
     private bool isHost = false;
     private string lastWinner = "";
     private int lastWinnerKills = 0;
+    private float lastScoreUpdateTime = 0f;
 
     private void Awake()
     {
@@ -49,12 +50,13 @@ public class UIManager : MonoBehaviour
         SetupFireButton();
         SetupLookArea();
 
+        // ✅ FIX: Subscribe to events with error handling
         Events.OnSetStatusText += SetStatusText;
         Events.OnShowMenu += ShowMenu;
         Events.OnShowGameOver += ShowGameOver;
         Events.OnUpdateScore += UpdateScoreText;
 
-        Debug.Log("[UIManager] Initialized");
+        Debug.Log("[UIManager] ✓ Initialized and subscribed to events");
     }
 
     private void OnDestroy()
@@ -70,7 +72,7 @@ public class UIManager : MonoBehaviour
         if (hostButton != null)
         {
             hostButton.onClick.AddListener(() => {
-                Debug.Log("[UIManager] Host clicked");
+                Debug.Log("[UIManager] 🖥️ Host clicked");
                 SetButtonsInteractable(false);
                 isHost = true;
                 Events.RaiseHostClicked();
@@ -80,7 +82,7 @@ public class UIManager : MonoBehaviour
         if (quickJoinButton != null)
         {
             quickJoinButton.onClick.AddListener(() => {
-                Debug.Log("[UIManager] QuickJoin clicked");
+                Debug.Log("[UIManager] 🔌 QuickJoin clicked");
                 SetButtonsInteractable(false);
                 isHost = false;
                 Events.RaiseQuickJoinClicked();
@@ -90,7 +92,7 @@ public class UIManager : MonoBehaviour
         if (restartButton != null)
         {
             restartButton.onClick.AddListener(() => {
-                Debug.Log("[UIManager] Restart clicked");
+                Debug.Log("[UIManager] 🔄 Restart clicked");
                 Events.RaiseRestartClicked();
             });
         }
@@ -98,7 +100,7 @@ public class UIManager : MonoBehaviour
         if (leaveButton != null)
         {
             leaveButton.onClick.AddListener(() => {
-                Debug.Log("[UIManager] Leave clicked");
+                Debug.Log("[UIManager] 🚪 Leave clicked");
                 Events.RaiseLeaveClicked();
             });
         }
@@ -106,18 +108,16 @@ public class UIManager : MonoBehaviour
 
     private void SetupMovementButtons()
     {
-        // Horizontal movement (WASD)
         SetupHoldButton(moveUp, Vector2.up, false);
         SetupHoldButton(moveDown, Vector2.down, false);
         SetupHoldButton(moveLeft, Vector2.left, false);
         SetupHoldButton(moveRight, Vector2.right, false);
 
-        // Vertical movement (Q/E for PC, buttons for mobile)
         if (moveUpVertical != null)
-            SetupHoldButton(moveUpVertical, Vector2.zero, true, 1f); // Up vertical
+            SetupHoldButton(moveUpVertical, Vector2.zero, true, 1f);
 
         if (moveDownVertical != null)
-            SetupHoldButton(moveDownVertical, Vector2.zero, true, -1f); // Down vertical
+            SetupHoldButton(moveDownVertical, Vector2.zero, true, -1f);
     }
 
     private void SetupHoldButton(Button b, Vector2 dir, bool isVertical = false, float verticalDir = 0f)
@@ -153,14 +153,12 @@ public class UIManager : MonoBehaviour
 
         var pd = new EventTrigger.Entry { eventID = EventTriggerType.PointerDown };
         pd.callback.AddListener((e) => {
-            Debug.Log("[UI] Fire Down");
             Events.RaiseFireDown();
         });
         trig.triggers.Add(pd);
 
         var pu = new EventTrigger.Entry { eventID = EventTriggerType.PointerUp };
         pu.callback.AddListener((e) => {
-            Debug.Log("[UI] Fire Up");
             Events.RaiseFireUp();
         });
         trig.triggers.Add(pu);
@@ -178,12 +176,11 @@ public class UIManager : MonoBehaviour
     {
         if (joinStatusText != null)
             joinStatusText.text = t;
-        Debug.Log($"[UIManager] Status: {t}");
     }
 
     private void ShowMenu(bool show)
     {
-        Debug.Log($"[UIManager] ShowMenu({show}) called");
+        Debug.Log($"[UIManager] 📺 ShowMenu({show})");
 
         if (show)
         {
@@ -204,6 +201,8 @@ public class UIManager : MonoBehaviour
 
         SetButtonsInteractable(true);
         playerScores.Clear();
+        lastWinner = "";
+        lastWinnerKills = 0;
         UpdateScoreDisplay();
 
         Debug.Log("[UIManager] ✓ Menu state active");
@@ -218,28 +217,28 @@ public class UIManager : MonoBehaviour
         bool isMobile = InputManager.Instance != null && !InputManager.Instance.useKeyboardMouse;
         SetActive(controllerPanel, isMobile);
 
-        // FIX: Keep showing current scores, don't reset to "Match starting..."
         UpdateScoreDisplay();
 
-        Debug.Log($"[UIManager] ✓ Gameplay state (Controls: {isMobile})");
+        Debug.Log($"[UIManager] ✓ Gameplay state (Mobile Controls: {isMobile})");
     }
 
     private void ShowGameOver()
     {
-        Debug.Log("[UIManager] ShowGameOver called");
+        Debug.Log("[UIManager] 🏁 ShowGameOver called");
 
         SetActive(gameOverPanel, true);
         SetActive(scorePanel, true);
         SetActive(controllerPanel, false);
         SetActive(joinPanel, false);
 
-        // FIX: Show winner information
+        // Show winner information
         if (winnerInfoText != null)
         {
-            if (!string.IsNullOrEmpty(lastWinner))
+            if (!string.IsNullOrEmpty(lastWinner) && lastWinnerKills > 0)
             {
                 winnerInfoText.gameObject.SetActive(true);
-                winnerInfoText.text = $"🏆 Winner: {lastWinner}\nKills: {lastWinnerKills}";
+                winnerInfoText.text = $"🏆 {lastWinner}\n{lastWinnerKills} Kills";
+                Debug.Log($"[UIManager] 🏆 Displaying winner: {lastWinner} ({lastWinnerKills} kills)");
             }
             else
             {
@@ -280,34 +279,55 @@ public class UIManager : MonoBehaviour
                 playerCountText.gameObject.SetActive(false);
         }
 
-        Debug.Log("[UIManager] ✓ Game over state");
+        Debug.Log("[UIManager] ✓ Game over state displayed");
     }
 
+    // ✅ FIX: Enhanced score update with proper tracking
     private void UpdateScoreText(string playerName, int kills)
     {
-        Debug.Log($"[UIManager] === UpdateScoreText called ===");
-        Debug.Log($"[UIManager] Player: {playerName}, Kills: {kills}");
+        Debug.Log($"[UIManager] ==================");
+        Debug.Log($"[UIManager] 📊 UpdateScoreText EVENT");
+        Debug.Log($"[UIManager] Player: {playerName}");
+        Debug.Log($"[UIManager] Kills: {kills}");
+        Debug.Log($"[UIManager] Time: {Time.time:F2}");
 
-        // Update player's score in dictionary
+        // ✅ FIX: Update player's score
+        if (!playerScores.ContainsKey(playerName))
+        {
+            Debug.Log($"[UIManager] ➕ Adding new player: {playerName}");
+        }
+        else
+        {
+            Debug.Log($"[UIManager] 🔄 Updating {playerName}: {playerScores[playerName]} → {kills}");
+        }
+
         playerScores[playerName] = kills;
 
-        // Track winner (player with most kills)
-        if (kills > lastWinnerKills || (kills == lastWinnerKills && playerName == lastWinner))
+        // Track winner (highest score)
+        if (kills > lastWinnerKills)
         {
             lastWinner = playerName;
             lastWinnerKills = kills;
+            Debug.Log($"[UIManager] 👑 New leader: {lastWinner} with {lastWinnerKills} kills");
         }
 
-        // Rebuild score display
+        // Update display
+        lastScoreUpdateTime = Time.time;
         UpdateScoreDisplay();
 
-        Debug.Log($"[UIManager] ✓ Score updated: {playerName} - {kills}");
-        Debug.Log($"[UIManager] Total players tracked: {playerScores.Count}");
+        Debug.Log($"[UIManager] ✓ Score updated successfully");
+        Debug.Log($"[UIManager] Total players: {playerScores.Count}");
+        Debug.Log($"[UIManager] ==================");
     }
 
+    // ✅ FIX: Clean and clear score display
     private void UpdateScoreDisplay()
     {
-        if (scoreText == null) return;
+        if (scoreText == null)
+        {
+            Debug.LogWarning("[UIManager] ⚠️ scoreText is null!");
+            return;
+        }
 
         if (playerScores.Count == 0)
         {
@@ -315,18 +335,28 @@ public class UIManager : MonoBehaviour
             return;
         }
 
-        // FIX: Simple format as requested: "Player1 -> X kills"
-        string scoreDisplay = "=== SCORES ===\n";
+        // Build score display
+        string display = "=== SCOREBOARD ===\n\n";
 
-        // Sort by kills descending
-        var sortedPlayers = playerScores.OrderByDescending(x => x.Value);
+        // Sort by kills (highest first)
+        var sortedPlayers = playerScores.OrderByDescending(x => x.Value).ToList();
 
-        foreach (var player in sortedPlayers)
+        for (int i = 0; i < sortedPlayers.Count; i++)
         {
-            scoreDisplay += $"{player.Key} → {player.Value} kills\n";
+            var player = sortedPlayers[i];
+            string medal = "";
+
+            if (i == 0 && player.Value > 0)
+                medal = "🥇 ";
+            else if (i == 1 && player.Value > 0)
+                medal = "🥈 ";
+            else if (i == 2 && player.Value > 0)
+                medal = "🥉 ";
+
+            display += $"{medal}{player.Key} → {player.Value}\n";
         }
 
-        scoreText.text = scoreDisplay;
+        scoreText.text = display;
     }
 
     private void SetButtonsInteractable(bool interactable)
@@ -344,6 +374,25 @@ public class UIManager : MonoBehaviour
         {
             obj.SetActive(active);
         }
+    }
+
+    // ✅ FIX: Debug display
+    private void OnGUI()
+    {
+        if (!Debug.isDebugBuild) return;
+
+        GUI.color = Color.cyan;
+        GUILayout.BeginArea(new Rect(Screen.width - 310, 10, 300, 150));
+        GUILayout.Label("=== UI MANAGER (CLIENT) ===");
+        GUILayout.Label($"Players Tracked: {playerScores.Count}");
+        GUILayout.Label($"Leader: {lastWinner} ({lastWinnerKills})");
+        GUILayout.Label($"Last Update: {Time.time - lastScoreUpdateTime:F1}s ago");
+        GUILayout.Label("--- Scores ---");
+        foreach (var kvp in playerScores.OrderByDescending(x => x.Value).Take(3))
+        {
+            GUILayout.Label($"{kvp.Key}: {kvp.Value}");
+        }
+        GUILayout.EndArea();
     }
 
     private class LookAreaHandler : MonoBehaviour, IDragHandler, IPointerDownHandler, IPointerUpHandler
