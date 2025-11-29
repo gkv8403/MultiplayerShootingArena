@@ -459,6 +459,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a18fc96774d81f046a50fe19d5d41e44, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  useKeyboardMouse: 1
 --- !u!1 &286890023
 GameObject:
   m_ObjectHideFlags: 0
@@ -731,8 +732,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   target: {fileID: 0}
-  distance: 0.1
-  height: 0.6
+  distance: 3
+  height: 1.5
   smoothSpeed: 8
   firePoint: {fileID: 0}
   raycastDistance: 100

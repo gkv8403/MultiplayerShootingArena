@@ -1,4 +1,4 @@
-using TMPro;
+﻿using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -30,83 +30,23 @@ public class UIManager : MonoBehaviour
     public RectTransform lookArea;
     public Image crosshair;
 
-    private bool menuVisible = true;
-    private bool gameplayVisible = false;
-
     private void Awake()
     {
-        // Initialize all panels
-        if (joinPanel != null) joinPanel.SetActive(true);
-        if (scorePanel != null) scorePanel.SetActive(false);
-        if (gameOverPanel != null) gameOverPanel.SetActive(false);
-        if (controllerPanel != null) controllerPanel.SetActive(false);
+        // Start with menu visible
+        ShowMenuState();
 
-        Debug.Log("[UIManager] Panels initialized - Menu only visible");
+        SetupMenuButtons();
+        SetupMovementButtons();
+        SetupFireButton();
+        SetupLookArea();
 
-        // Setup button listeners
-        if (hostButton != null)
-            hostButton.onClick.AddListener(() => {
-                Debug.Log("[UIManager] Host clicked");
-                Events.RaiseHostClicked();
-            });
-
-        if (quickJoinButton != null)
-            quickJoinButton.onClick.AddListener(() => {
-                Debug.Log("[UIManager] QuickJoin clicked");
-                Events.RaiseQuickJoinClicked();
-            });
-
-        if (restartButton != null)
-            restartButton.onClick.AddListener(() => {
-                Debug.Log("[UIManager] Restart clicked");
-                Events.RaiseRestartClicked();
-            });
-
-        if (leaveButton != null)
-            leaveButton.onClick.AddListener(() => {
-                Debug.Log("[UIManager] Leave clicked");
-                Events.RaiseLeaveClicked();
-            });
-
-        SetupHoldButton(moveUp, Vector2.up);
-        SetupHoldButton(moveDown, Vector2.down);
-        SetupHoldButton(moveLeft, Vector2.left);
-        SetupHoldButton(moveRight, Vector2.right);
-
-        // Fire button setup
-        if (fireButton != null)
-        {
-            var trig = fireButton.gameObject.AddComponent<EventTrigger>();
-
-            var pd = new EventTrigger.Entry { eventID = EventTriggerType.PointerDown };
-            pd.callback.AddListener((e) => {
-                Debug.Log("[UI] Fire Down");
-                Events.RaiseFireDown();
-            });
-            trig.triggers.Add(pd);
-
-            var pu = new EventTrigger.Entry { eventID = EventTriggerType.PointerUp };
-            pu.callback.AddListener((e) => {
-                Debug.Log("[UI] Fire Up");
-                Events.RaiseFireUp();
-            });
-            trig.triggers.Add(pu);
-        }
-
-        // Look area setup
-        if (lookArea != null)
-        {
-            var dragHandler = lookArea.gameObject.AddComponent<LookAreaHandler>();
-            dragHandler.OnDragDelta = (delta) => Events.RaiseLookDelta(delta);
-        }
-
-        // Subscribe to game events
+        // Subscribe to events
         Events.OnSetStatusText += SetStatusText;
         Events.OnShowMenu += ShowMenu;
         Events.OnShowGameOver += ShowGameOver;
         Events.OnUpdateScore += UpdateScoreText;
 
-        Debug.Log("[UIManager] Event subscribers set up");
+        Debug.Log("[UIManager] Initialized");
     }
 
     private void OnDestroy()
@@ -115,6 +55,51 @@ public class UIManager : MonoBehaviour
         Events.OnShowMenu -= ShowMenu;
         Events.OnShowGameOver -= ShowGameOver;
         Events.OnUpdateScore -= UpdateScoreText;
+    }
+
+    private void SetupMenuButtons()
+    {
+        if (hostButton != null)
+        {
+            hostButton.onClick.AddListener(() => {
+                Debug.Log("[UIManager] Host clicked");
+                SetButtonsInteractable(false);
+                Events.RaiseHostClicked();
+            });
+        }
+
+        if (quickJoinButton != null)
+        {
+            quickJoinButton.onClick.AddListener(() => {
+                Debug.Log("[UIManager] QuickJoin clicked");
+                SetButtonsInteractable(false);
+                Events.RaiseQuickJoinClicked();
+            });
+        }
+
+        if (restartButton != null)
+        {
+            restartButton.onClick.AddListener(() => {
+                Debug.Log("[UIManager] Restart clicked");
+                Events.RaiseRestartClicked();
+            });
+        }
+
+        if (leaveButton != null)
+        {
+            leaveButton.onClick.AddListener(() => {
+                Debug.Log("[UIManager] Leave clicked");
+                Events.RaiseLeaveClicked();
+            });
+        }
+    }
+
+    private void SetupMovementButtons()
+    {
+        SetupHoldButton(moveUp, Vector2.up);
+        SetupHoldButton(moveDown, Vector2.down);
+        SetupHoldButton(moveLeft, Vector2.left);
+        SetupHoldButton(moveRight, Vector2.right);
     }
 
     private void SetupHoldButton(Button b, Vector2 dir)
@@ -132,6 +117,35 @@ public class UIManager : MonoBehaviour
         trig.triggers.Add(up);
     }
 
+    private void SetupFireButton()
+    {
+        if (fireButton == null) return;
+
+        var trig = fireButton.gameObject.AddComponent<EventTrigger>();
+
+        var pd = new EventTrigger.Entry { eventID = EventTriggerType.PointerDown };
+        pd.callback.AddListener((e) => {
+            Debug.Log("[UI] Fire Down");
+            Events.RaiseFireDown();
+        });
+        trig.triggers.Add(pd);
+
+        var pu = new EventTrigger.Entry { eventID = EventTriggerType.PointerUp };
+        pu.callback.AddListener((e) => {
+            Debug.Log("[UI] Fire Up");
+            Events.RaiseFireUp();
+        });
+        trig.triggers.Add(pu);
+    }
+
+    private void SetupLookArea()
+    {
+        if (lookArea == null) return;
+
+        var dragHandler = lookArea.gameObject.AddComponent<LookAreaHandler>();
+        dragHandler.OnDragDelta = (delta) => Events.RaiseLookDelta(delta);
+    }
+
     private void SetStatusText(string t)
     {
         if (joinStatusText != null)
@@ -145,45 +159,85 @@ public class UIManager : MonoBehaviour
 
         if (show)
         {
-            // Show menu panels
-            if (joinPanel != null) joinPanel.SetActive(true);
-            if (scorePanel != null) scorePanel.SetActive(false);
-            if (controllerPanel != null) controllerPanel.SetActive(false);
-            if (gameOverPanel != null) gameOverPanel.SetActive(false);
-            menuVisible = true;
-            gameplayVisible = false;
-            Debug.Log("[UIManager] Menu panels shown, gameplay hidden");
+            ShowMenuState();
         }
         else
         {
-            // Show gameplay panels
-            if (joinPanel != null) joinPanel.SetActive(false);
-            if (scorePanel != null) scorePanel.SetActive(true);
-            if (controllerPanel != null) controllerPanel.SetActive(true);
-            if (gameOverPanel != null) gameOverPanel.SetActive(false);
-            menuVisible = false;
-            gameplayVisible = true;
-            Debug.Log("[UIManager] Gameplay panels shown, menu hidden");
+            ShowGameplayState();
         }
+    }
+
+    private void ShowMenuState()
+    {
+        // Show ONLY menu panel
+        SetActive(joinPanel, true);
+        SetActive(scorePanel, false);
+        SetActive(controllerPanel, false);
+        SetActive(gameOverPanel, false);
+
+        SetButtonsInteractable(true);
+
+        Debug.Log("[UIManager] ✓ Menu state active");
+    }
+
+    private void ShowGameplayState()
+    {
+        // Hide menu, show gameplay UI
+        SetActive(joinPanel, false);
+        SetActive(scorePanel, true);
+        SetActive(gameOverPanel, false);
+
+        // Show controls based on input mode
+        bool isMobile = InputManager.Instance != null && !InputManager.Instance.useKeyboardMouse;
+        SetActive(controllerPanel, isMobile);
+
+        // Initialize score
+        if (scoreText != null)
+            scoreText.text = "Waiting for match...";
+
+        Debug.Log($"[UIManager] ✓ Gameplay state (Controls: {isMobile})");
     }
 
     private void ShowGameOver()
     {
         Debug.Log("[UIManager] ShowGameOver called");
 
-        if (gameOverPanel != null) gameOverPanel.SetActive(true);
-        if (scorePanel != null) scorePanel.SetActive(false);
-        if (controllerPanel != null) controllerPanel.SetActive(false);
-        if (joinPanel != null) joinPanel.SetActive(false);
+        // Show game over panel, keep score visible
+        SetActive(gameOverPanel, true);
+        SetActive(scorePanel, true);
+        SetActive(controllerPanel, false);
+        SetActive(joinPanel, false);
 
-        Debug.Log("[UIManager] Game over panel shown");
+        if (gameOverText != null)
+            gameOverText.text = "Game Over!";
+
+        Debug.Log("[UIManager] ✓ Game over state");
     }
 
     private void UpdateScoreText(string playerName, int kills)
     {
         if (scoreText != null)
-            scoreText.text = $"{playerName}: {kills}";
-        Debug.Log($"[UIManager] Score updated: {playerName} - {kills}");
+        {
+            scoreText.text = $"{playerName}: {kills} kills";
+            Debug.Log($"[UIManager] ✓ Score updated: {playerName} - {kills}");
+        }
+    }
+
+    private void SetButtonsInteractable(bool interactable)
+    {
+        if (hostButton != null)
+            hostButton.interactable = interactable;
+
+        if (quickJoinButton != null)
+            quickJoinButton.interactable = interactable;
+    }
+
+    private void SetActive(GameObject obj, bool active)
+    {
+        if (obj != null && obj.activeSelf != active)
+        {
+            obj.SetActive(active);
+        }
     }
 
     private class LookAreaHandler : MonoBehaviour, IDragHandler, IPointerDownHandler, IPointerUpHandler

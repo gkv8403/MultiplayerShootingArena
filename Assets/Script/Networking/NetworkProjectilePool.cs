@@ -1,137 +1,133 @@
-using Fusion;
+﻿using Fusion;
 using UnityEngine;
 using System.Collections.Generic;
 using System.Linq;
 
 public class NetworkProjectilePool : MonoBehaviour
 {
+    public static NetworkProjectilePool Instance { get; private set; }
+
     public NetworkPrefabRef projectilePrefab;
-    public int poolSize = 20;
+    public int poolSize = 30;
     private List<NetworkObject> pool = new List<NetworkObject>();
     private NetworkRunner runner;
     private bool initialized = false;
 
-    private void Start()
+    private void Awake()
     {
-        Debug.Log("[Pool] Start() called - waiting for runner...");
-
-        // Wait for runner to be spawned
-        if (GameStateManager.Instance != null)
+        if (Instance != null && Instance != this)
         {
-            GameStateManager.Instance.OnRunnerSpawned += OnRunnerSpawned;
-            Debug.Log("[Pool] Subscribed to OnRunnerSpawned event");
+            Destroy(gameObject);
+            return;
         }
-        else
-        {
-            Debug.LogError("[Pool] GameStateManager.Instance not found!");
-        }
+        Instance = this;
+        DontDestroyOnLoad(gameObject);
+        Debug.Log("[Pool] Instance created");
     }
 
-    private void OnRunnerSpawned(NetworkRunner newRunner)
+    private void Start()
     {
-        if (initialized)
-        {
-            Debug.LogWarning("[Pool] Already initialized!");
-            return;
-        }
+        Events.OnMatchStart += OnMatchStarted;
+    }
 
-        Debug.Log("[Pool] OnRunnerSpawned callback received");
-        runner = newRunner;
+    private void OnMatchStarted()
+    {
+        if (initialized) return;
 
-        if (runner == null)
-        {
-            Debug.LogError("[Pool] Runner is null!");
-            return;
-        }
-
-        Debug.Log($"[Pool] NetworkRunner found. IsServer: {runner.IsServer}");
-
-        if (!runner.IsServer)
-        {
-            Debug.LogWarning("[Pool] Not server, skipping pool initialization");
-            return;
-        }
-
-        InitializePool();
+        Debug.Log("[Pool] Match started - initializing...");
+        Invoke(nameof(InitializePool), 0.5f);
     }
 
     private void InitializePool()
     {
-        Debug.Log($"[Pool] Creating pool with {poolSize} projectiles...");
+        runner = FindObjectOfType<NetworkRunner>();
+
+        if (runner == null)
+        {
+            Debug.LogError("[Pool] Runner not found!");
+            Invoke(nameof(InitializePool), 0.5f);
+            return;
+        }
+
+        if (!runner.IsServer)
+        {
+            Debug.Log("[Pool] Not server, skipping pool init");
+            return;
+        }
+
+        Debug.Log($"[Pool] Creating {poolSize} projectiles...");
 
         for (int i = 0; i < poolSize; i++)
         {
-            try
+            // Spawn at origin
+            var no = runner.Spawn(
+                projectilePrefab,
+                Vector3.zero,
+                Quaternion.identity,
+                PlayerRef.None
+            );
+
+            if (no != null)
             {
-                var no = runner.Spawn(projectilePrefab, Vector3.zero, Quaternion.identity, PlayerRef.Invalid);
                 pool.Add(no);
-                Debug.Log($"[Pool] Spawned projectile {i}: {no.gameObject.name}");
-            }
-            catch (System.Exception e)
-            {
-                Debug.LogError($"[Pool] Failed to spawn projectile {i}: {e.Message}");
+
+                // Disable the GameObject immediately
+                no.gameObject.SetActive(false);
+
+                Debug.Log($"[Pool] Created projectile {i + 1}/{poolSize}");
             }
         }
 
-        Debug.Log($"[Pool] Pool initialized with {pool.Count} projectiles");
         initialized = true;
+        Debug.Log($"[Pool] ✓ Pool ready with {pool.Count} projectiles");
     }
 
     public NetworkObject GetPooledProjectile()
     {
         if (!initialized)
         {
-            Debug.LogError("[Pool] Pool not initialized yet!");
-            return null;
-        }
-
-        if (runner == null || !runner.IsServer)
-        {
-            Debug.LogError("[Pool] Not server or runner null!");
+            Debug.LogError("[Pool] Not initialized!");
             return null;
         }
 
         // Find first inactive projectile
-        var projObj = pool.FirstOrDefault(n =>
+        foreach (var no in pool)
         {
-            if (n == null)
+            if (no == null) continue;
+
+            // Check if GameObject is inactive
+            if (!no.gameObject.activeSelf)
             {
-                Debug.LogWarning("[Pool] Found null in pool!");
-                return false;
+                return no;
             }
 
-            var pb = n.GetComponent<Scripts.Gameplay.Projectile>();
-            if (pb == null)
+            // Or check via Projectile component
+            var proj = no.GetComponent<Scripts.Gameplay.Projectile>();
+            if (proj != null && !proj.IsActive)
             {
-                Debug.LogError($"[Pool] Projectile component missing on {n.gameObject.name}!");
-                return false;
+                return no;
             }
-
-            return !pb.IsActive;
-        });
-
-        if (projObj != null)
-        {
-            Debug.Log($"[Pool] Returning pooled projectile: {projObj.gameObject.name}");
-            return projObj;
         }
 
-        Debug.LogWarning("[Pool] No inactive projectile found!");
+        Debug.LogWarning("[Pool] No inactive projectile! Increase pool size.");
         return null;
     }
 
     private void OnDestroy()
     {
-        if (GameStateManager.Instance != null)
-            GameStateManager.Instance.OnRunnerSpawned -= OnRunnerSpawned;
+        Events.OnMatchStart -= OnMatchStarted;
     }
 
     private void OnGUI()
     {
         if (!initialized) return;
 
-        GUILayout.Label($"[Pool] Total: {pool.Count}");
-        int activeCount = pool.Count(p => p != null && p.GetComponent<Scripts.Gameplay.Projectile>().IsActive);
-        GUILayout.Label($"[Pool] Active: {activeCount}");
+        int active = pool.Count(p => p != null && p.gameObject.activeSelf);
+
+        GUILayout.BeginArea(new Rect(10, 100, 200, 100));
+        GUILayout.Label($"Pool Total: {pool.Count}");
+        GUILayout.Label($"Pool Active: {active}");
+        GUILayout.Label($"Pool Available: {pool.Count - active}");
+        GUILayout.EndArea();
     }
 }

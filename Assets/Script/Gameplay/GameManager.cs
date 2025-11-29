@@ -1,11 +1,9 @@
 using Fusion;
 using UnityEngine;
-using System.Collections.Generic;
 
-// Authoritative game manager: starts and ends match, tracks kills and scoreboard.
 public class GameManager : MonoBehaviour
 {
-    public int killsToWin = 40;
+    public int killsToWin = 10;
     private bool matchRunning = false;
 
     private void OnEnable()
@@ -24,39 +22,61 @@ public class GameManager : MonoBehaviour
 
     private void StartMatch()
     {
-        if (matchRunning) return;
+        if (matchRunning)
+        {
+            Debug.Log("[GameManager] Match already running");
+            return;
+        }
+
         matchRunning = true;
+        Debug.Log("[GameManager] Match started!");
+
         Events.RaiseSetStatusText("Match started!");
         Events.RaiseShowMenu(false);
-        // Notify player objects to enable combat
+
+        // Enable combat on all players
         var players = FindObjectsOfType<Scripts.Gameplay.PlayerController>();
         foreach (var p in players)
         {
             p.EnableCombat(true);
         }
+
+        Debug.Log($"[GameManager] Combat enabled for {players.Length} players");
     }
 
     public void EndMatch()
     {
-        if (!matchRunning) return;
+        if (!matchRunning)
+        {
+            Debug.Log("[GameManager] Match not running");
+            return;
+        }
+
         matchRunning = false;
+        Debug.Log("[GameManager] Match ended!");
+
         Events.RaiseSetStatusText("Match ended!");
         Events.RaiseShowGameOver();
-        Events.RaiseMatchEnd();
-        // Disable combat on players
+
+        // Disable combat on all players
         var players = FindObjectsOfType<Scripts.Gameplay.PlayerController>();
         foreach (var p in players)
+        {
             p.EnableCombat(false);
+        }
     }
-
-    // Called by PlayerController (or the PlayerController triggers score UI updates via Events)
+        
     private void OnUpdateScoreUI(string playerName, int kills)
     {
-        if (kills >= killsToWin)
+        Debug.Log($"[GameManager] Score update: {playerName} - {kills} kills");
+
+        if (kills >= killsToWin && matchRunning)
         {
-            // Match end
+            Debug.Log($"[GameManager] {playerName} reached {killsToWin} kills - Match over!");
             Events.RaiseSetStatusText($"{playerName} won!");
             EndMatch();
         }
     }
+
+    public bool IsMatchRunning() => matchRunning;
 }

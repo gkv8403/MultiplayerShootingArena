@@ -123,9 +123,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 832f8b7e9077c4c4692ceba9e2602c29, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  _IsActive: 0
   speed: 20
   damage: 20
   lifetime: 3
+  visualObject: {fileID: 0}
+  trail: {fileID: 0}
 --- !u!114 &-7608412270093557611
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -168,7 +171,7 @@ Rigidbody:
   m_ImplicitCom: 1
   m_ImplicitTensor: 1
   m_UseGravity: 1
-  m_IsKinematic: 0
+  m_IsKinematic: 1
   m_Interpolate: 0
   m_Constraints: 0
-  m_CollisionDetection: 0
+  m_CollisionDetection: 1
