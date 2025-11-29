@@ -10,6 +10,7 @@ public class InputManager : MonoBehaviour
     public Vector2 CurrentMoveInput { get; private set; }
     public Vector2 CurrentLookDelta { get; private set; }
     public bool CurrentFire { get; private set; }
+    public float CurrentVerticalMove { get; private set; } // NEW: For Q/E up/down
 
     private void Awake()
     {
@@ -25,7 +26,7 @@ public class InputManager : MonoBehaviour
 #if UNITY_STANDALONE || UNITY_EDITOR
         useKeyboardMouse = true;
 #else
-            useKeyboardMouse = false;
+        useKeyboardMouse = false;
 #endif
 
         Debug.Log($"[InputManager] Initialized - Keyboard/Mouse: {useKeyboardMouse}");
@@ -38,6 +39,8 @@ public class InputManager : MonoBehaviour
         Events.OnLookDelta += OnLook;
         Events.OnFireDown += OnFireDown;
         Events.OnFireUp += OnFireUp;
+        Events.OnVerticalMoveInput += OnVerticalMove;
+        Events.OnVerticalMoveInputStop += OnVerticalMoveStop;
     }
 
     private void OnDisable()
@@ -47,6 +50,8 @@ public class InputManager : MonoBehaviour
         Events.OnLookDelta -= OnLook;
         Events.OnFireDown -= OnFireDown;
         Events.OnFireUp -= OnFireUp;
+        Events.OnVerticalMoveInput -= OnVerticalMove;
+        Events.OnVerticalMoveInputStop -= OnVerticalMoveStop;
     }
 
     private void Update()
@@ -62,7 +67,7 @@ public class InputManager : MonoBehaviour
 
     private void HandleKeyboardInput()
     {
-        // Movement input
+        // Horizontal movement (WASD)
         Vector2 moveInput = Vector2.zero;
 
         if (Input.GetKey(KeyCode.W)) moveInput.y += 1;
@@ -71,6 +76,13 @@ public class InputManager : MonoBehaviour
         if (Input.GetKey(KeyCode.D)) moveInput.x += 1;
 
         CurrentMoveInput = Vector2.ClampMagnitude(moveInput, 1f);
+
+        // NEW: Vertical movement (Q/E for up/down)
+        float verticalInput = 0f;
+        if (Input.GetKey(KeyCode.Q)) verticalInput += 1f;  // Up
+        if (Input.GetKey(KeyCode.E)) verticalInput -= 1f;  // Down
+
+        CurrentVerticalMove = verticalInput;
 
         // Mouse look - horizontal and vertical
         float mouseX = Input.GetAxis("Mouse X");
@@ -117,5 +129,18 @@ public class InputManager : MonoBehaviour
     private void OnFireUp()
     {
         CurrentFire = false;
+    }
+
+    // NEW: Vertical movement for mobile
+    private void OnVerticalMove(float dir)
+    {
+        if (useKeyboardMouse) return;
+        CurrentVerticalMove = dir;
+    }
+
+    private void OnVerticalMoveStop()
+    {
+        if (useKeyboardMouse) return;
+        CurrentVerticalMove = 0f;
     }
 }

@@ -15,12 +15,17 @@ public class Projectile : NetworkBehaviour
     private TickTimer lifeTimer;
     public bool IsActive => IsActiveNetworked;
 
-    // Visual component (optional)
     private TrailRenderer trail;
+    private Renderer projectileRenderer;
 
     private void Awake()
     {
         trail = GetComponent<TrailRenderer>();
+        projectileRenderer = GetComponent<Renderer>();
+
+        // Start hidden
+        if (projectileRenderer != null)
+            projectileRenderer.enabled = false;
     }
 
     public void ForceDeactivateNetworked()
@@ -34,95 +39,128 @@ public class Projectile : NetworkBehaviour
         NetworkPosition = Vector3.one * 9999f;
         transform.position = NetworkPosition;
 
-        // Clear trail
         if (trail != null)
             trail.Clear();
+
+        // Tell all clients to hide this projectile
+        RPC_HideProjectile();
     }
 
-    // FIX 1: Fire now properly sets position and direction
     public void Fire(PlayerRef owner, Vector3 position, Vector3 direction)
     {
         if (!Object.HasStateAuthority) return;
 
-        Debug.Log($"[Projectile] Firing from {position} direction {direction}");
+        Debug.Log($"[Projectile] SERVER firing from {position} direction {direction} for player {owner}");
 
         Owner = owner;
         IsActiveNetworked = true;
         lifeTimer = TickTimer.CreateFromSeconds(Runner, lifeSeconds);
 
-        // FIX 2: Set both local and networked position
         transform.position = position;
         NetworkPosition = position;
-
         Velocity = direction.normalized * speed;
 
-        // FIX 3: Notify clients to show projectile
-        RPC_OnProjectileFired(position, direction);
-    }
+        // Show on server
+        if (projectileRenderer != null)
+            projectileRenderer.enabled = true;
 
-    // FIX 4: RPC to sync visual on all clients
-    [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
-    private void RPC_OnProjectileFired(Vector3 position, Vector3 direction)
-    {
-        transform.position = position;
         if (trail != null)
         {
             trail.Clear();
             trail.enabled = true;
         }
-        Debug.Log($"[Projectile] Visual synced at {position}");
+
+        // FIX: Tell ALL clients to show and move this projectile
+        RPC_ShowProjectile(position, direction.normalized * speed);
+    }
+
+    // FIX: This RPC makes projectile visible on all clients
+    [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
+    private void RPC_ShowProjectile(Vector3 startPos, Vector3 velocity)
+    {
+        Debug.Log($"[Projectile] CLIENT showing projectile at {startPos}");
+
+        transform.position = startPos;
+
+        if (projectileRenderer != null)
+            projectileRenderer.enabled = true;
+
+        if (trail != null)
+        {
+            trail.Clear();
+            trail.enabled = true;
+        }
+    }
+
+    [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
+    private void RPC_HideProjectile()
+    {
+        if (projectileRenderer != null)
+            projectileRenderer.enabled = false;
+
+        if (trail != null)
+        {
+            trail.Clear();
+            trail.enabled = false;
+        }
     }
 
     public override void FixedUpdateNetwork()
     {
-        // FIX 5: Server simulates, clients interpolate
         if (Object.HasStateAuthority)
         {
             SimulateProjectile();
         }
         else
         {
-            InterpolateProjectile();
+            RenderProjectile();
         }
     }
 
     private void SimulateProjectile()
     {
-        if (!IsActiveNetworked) return;
+        if (!IsActiveNetworked)
+        {
+            if (projectileRenderer != null)
+                projectileRenderer.enabled = false;
+            return;
+        }
 
-        // Move projectile
+        // Move on server
         Vector3 movement = Velocity * Runner.DeltaTime;
         transform.position += movement;
         NetworkPosition = transform.position;
 
-        // Check lifetime
+        // Lifetime check
         if (lifeTimer.Expired(Runner))
         {
+            Debug.Log("[Projectile] Lifetime expired");
             Deactivate();
             return;
         }
 
-        // World bounds check
+        // Bounds check
         if (transform.position.magnitude > 2000f)
         {
+            Debug.Log("[Projectile] Out of bounds");
             Deactivate();
             return;
         }
 
-        // Hit detection - use raycast for accuracy
+        // Hit detection
         Ray ray = new Ray(transform.position - movement, movement.normalized);
         if (Physics.Raycast(ray, out RaycastHit hit, movement.magnitude + 0.5f))
         {
-            // Check if we hit a player
+            Debug.Log($"[Projectile] Hit something: {hit.collider.name}");
+
             var hitObj = hit.collider.GetComponentInParent<NetworkObject>();
             if (hitObj != null)
             {
                 var pc = hitObj.GetComponent<PlayerController>();
                 if (pc != null && pc.Object.InputAuthority != Owner)
                 {
-                    // Apply damage
+                    Debug.Log($"[Projectile] Hit player {pc.PlayerName}! Applying damage...");
                     pc.RPC_TakeDamage(damage, Owner);
-                    Debug.Log($"[Projectile] Hit {pc.PlayerName}!");
                 }
             }
 
@@ -130,20 +168,20 @@ public class Projectile : NetworkBehaviour
         }
     }
 
-    // FIX 6: Smooth interpolation for clients
-    private void InterpolateProjectile()
+    private void RenderProjectile()
     {
         if (!IsActiveNetworked)
         {
-            // Hide inactive projectiles
-            if (transform.position.magnitude < 9000f)
-            {
-                transform.position = Vector3.one * 9999f;
-            }
+            if (projectileRenderer != null && projectileRenderer.enabled)
+                projectileRenderer.enabled = false;
             return;
         }
 
-        // Interpolate to network position
+        // Show projectile
+        if (projectileRenderer != null && !projectileRenderer.enabled)
+            projectileRenderer.enabled = true;
+
+        // Smooth movement to network position
         transform.position = Vector3.Lerp(transform.position, NetworkPosition, 30f * Runner.DeltaTime);
     }
 
@@ -154,7 +192,6 @@ public class Projectile : NetworkBehaviour
         ForceDeactivateNetworked();
     }
 
-    // FIX 7: Visual debugging
     private void OnDrawGizmos()
     {
         if (IsActiveNetworked)

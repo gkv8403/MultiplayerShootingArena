@@ -241,7 +241,8 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
         {
             moveInput = im.CurrentMoveInput,
             lookInput = im.CurrentLookDelta,
-            fire = im.CurrentFire
+            fire = im.CurrentFire,
+            verticalMove = im.CurrentVerticalMove // NEW: Vertical movement
         };
 
         input.Set(data);

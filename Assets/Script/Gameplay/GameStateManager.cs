@@ -8,7 +8,7 @@ public class GameStateManager : MonoBehaviour
 
     public event Action<NetworkRunner> OnRunnerSpawned;
 
-    [SerializeField] private NetworkRunner runner;
+    //[SerializeField] private NetworkRunner runner;
 
     private GameState currentState = GameState.Menu;
 
@@ -27,6 +27,7 @@ public class GameStateManager : MonoBehaviour
             Destroy(gameObject);
             return;
         }
+        
         Instance = this;
         DontDestroyOnLoad(gameObject);
         Debug.Log("[GameStateManager] Initialized as singleton");
@@ -104,11 +105,11 @@ public class GameStateManager : MonoBehaviour
         }
     }
 
-    public void NotifyRunnerSpawned(NetworkRunner newRunner)
+    /*public void NotifyRunnerSpawned(NetworkRunner newRunner)
     {
         Debug.Log("[GameStateManager] Runner spawned - notifying subscribers");
         OnRunnerSpawned?.Invoke(newRunner);
-    }
+    }*/
 
     public GameState GetCurrentState() => currentState;
 }

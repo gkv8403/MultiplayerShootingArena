@@ -16,6 +16,10 @@ public static class Events
     public static event Action OnFireDown;
     public static event Action OnFireUp;
 
+    // NEW: Vertical movement (Q/E for up/down)
+    public static event Action<float> OnVerticalMoveInput; // 1 = up, -1 = down
+    public static event Action OnVerticalMoveInputStop;
+
     // Network/Game -> UI
     public static event Action<string> OnSetStatusText;
     public static event Action<bool> OnShowMenu;
@@ -36,6 +40,11 @@ public static class Events
     public static void RaiseLookDelta(Vector2 d) => OnLookDelta?.Invoke(d);
     public static void RaiseFireDown() => OnFireDown?.Invoke();
     public static void RaiseFireUp() => OnFireUp?.Invoke();
+
+    // NEW: Vertical movement
+    public static void RaiseVerticalMoveInput(float dir) => OnVerticalMoveInput?.Invoke(dir);
+    public static void RaiseVerticalMoveInputStop() => OnVerticalMoveInputStop?.Invoke();
+
     public static void RaiseSetStatusText(string t) => OnSetStatusText?.Invoke(t);
     public static void RaiseShowMenu(bool b) => OnShowMenu?.Invoke(b);
     public static void RaiseShowGameOver() => OnShowGameOver?.Invoke();
