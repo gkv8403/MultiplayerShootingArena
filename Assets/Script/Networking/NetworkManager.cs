@@ -15,7 +15,8 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
     public NetworkPrefabRef playerPrefab;
     public Transform[] spawnPoints;
 
-    private const string GLOBAL_SESSION_NAME = "GLOBAL_MULTIPLAYER_ROOM";
+    // FIX 1: Use timestamp-based session names for unique rooms
+    private string currentSessionName = "";
     private bool isConnecting = false;
     private int connectionAttempts = 0;
     private const int MAX_CONNECTION_ATTEMPTS = 3;
@@ -43,26 +44,30 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
             runner.RemoveCallbacks(this);
     }
 
-    private void OnHostClicked() => StartRunnerAsHost();
-    private void OnQuickJoinClicked() => StartRunnerQuickJoin();
-
-    // Create a new session as Host
-    public void StartRunnerAsHost()
+    // FIX 2: Host always creates NEW session with unique name
+    private void OnHostClicked()
     {
         if (isConnecting) return;
-        Debug.Log("[NetworkManager] Starting as explicit Host");
-        StartRunner(GameMode.Host);
+
+        // Generate unique session name with timestamp
+        currentSessionName = $"ARENA_{System.DateTime.UtcNow.Ticks}";
+        Debug.Log($"[NetworkManager] Creating NEW session as Host: {currentSessionName}");
+
+        StartRunner(GameMode.Host, currentSessionName);
     }
 
-    // Try to join existing session, or create new one if none available
-    public void StartRunnerQuickJoin()
+    // FIX 3: Quick Join searches for rooms, creates new if none found
+    private void OnQuickJoinClicked()
     {
         if (isConnecting) return;
-        Debug.Log("[NetworkManager] Starting Quick Join (AutoHostOrClient)");
-        StartRunner(GameMode.AutoHostOrClient);
+
+        Debug.Log("[NetworkManager] Quick Join - searching for available rooms...");
+        currentSessionName = ""; // Empty = search for any room
+
+        StartRunner(GameMode.AutoHostOrClient, currentSessionName);
     }
 
-    private async void StartRunner(GameMode mode)
+    private async void StartRunner(GameMode mode, string sessionName)
     {
         if (isConnecting)
         {
@@ -70,10 +75,13 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
             return;
         }
 
+        // FIX 4: Cleanup existing runner before starting new one
         if (runner != null)
         {
-            Events.RaiseSetStatusText("Already connected");
-            return;
+            Debug.Log("[NetworkManager] Cleaning up existing runner...");
+            await runner.Shutdown();
+            CleanupRunner();
+            await Task.Delay(500); // Wait for cleanup
         }
 
         isConnecting = true;
@@ -82,12 +90,16 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
         while (connectionAttempts < MAX_CONNECTION_ATTEMPTS)
         {
             connectionAttempts++;
-            Events.RaiseSetStatusText($"Connecting... ({connectionAttempts}/{MAX_CONNECTION_ATTEMPTS})");
-            Debug.Log($"[NetworkManager] Connection attempt {connectionAttempts} - Mode: {mode}");
+
+            string statusMsg = mode == GameMode.Host
+                ? $"Creating room... ({connectionAttempts}/{MAX_CONNECTION_ATTEMPTS})"
+                : $"Finding room... ({connectionAttempts}/{MAX_CONNECTION_ATTEMPTS})";
+
+            Events.RaiseSetStatusText(statusMsg);
+            Debug.Log($"[NetworkManager] Attempt {connectionAttempts} - Mode: {mode}");
 
             try
             {
-                // Create runner instance
                 runner = Instantiate(runnerPrefab);
                 runner.name = "NetworkRunner";
                 runner.ProvideInput = true;
@@ -95,54 +107,73 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
 
                 var sceneManager = runner.gameObject.AddComponent<NetworkSceneManagerDefault>();
 
+                // FIX 5: Proper StartGameArgs configuration
                 var args = new StartGameArgs()
                 {
                     GameMode = mode,
-                    SessionName = GLOBAL_SESSION_NAME,
+                    SessionName = string.IsNullOrEmpty(sessionName) ? null : sessionName, // null = search any
                     PlayerCount = 16,
                     SceneManager = sceneManager,
-                    // Add session properties for better matchmaking
                     SessionProperties = new Dictionary<string, SessionProperty>
                     {
                         { "GameType", "Arena" },
-                        { "Version", "1.0" }
-                    }
+                        { "Version", "1.0" },
+                        { "Map", "Arena_Default" }
+                    },
+                    // FIX 6: Add matchmaking options
+                    CustomLobbyName = "DefaultLobby"
                 };
 
-                Debug.Log($"[NetworkManager] Starting game with mode: {mode}, session: {GLOBAL_SESSION_NAME}");
+                Debug.Log($"[NetworkManager] Starting - Mode: {mode}, Session: {sessionName ?? "ANY"}");
 
                 var startResult = await runner.StartGame(args);
 
                 if (startResult.Ok)
                 {
                     string roleText = runner.IsServer ? "Host/Server" : "Client";
-                    Debug.Log($"[NetworkManager] ✓ Started as {roleText}");
+                    currentSessionName = runner.SessionInfo.Name;
+
+                    Debug.Log($"[NetworkManager] ✓ Connected as {roleText}");
+                    Debug.Log($"[NetworkManager] Session: {currentSessionName}");
+
                     Events.RaiseSetStatusText($"Connected as {roleText}");
                     isConnecting = false;
                     Events.RaiseShowMenu(false);
-                    return;
+                    return; // Success!
                 }
                 else
                 {
-                    Debug.LogError($"[NetworkManager] Start failed: {startResult.ShutdownReason}");
-                    Events.RaiseSetStatusText($"Failed: {startResult.ShutdownReason}");
+                    Debug.LogWarning($"[NetworkManager] Start failed: {startResult.ShutdownReason}");
+
+                    // FIX 7: If AutoHostOrClient failed to find room, become host
+                    if (mode == GameMode.AutoHostOrClient && connectionAttempts >= 2)
+                    {
+                        Debug.Log("[NetworkManager] No rooms found, becoming host...");
+                        CleanupRunner();
+                        currentSessionName = $"ARENA_{System.DateTime.UtcNow.Ticks}";
+                        mode = GameMode.Host;
+                        connectionAttempts = 0; // Reset for host attempt
+                        continue;
+                    }
+
+                    Events.RaiseSetStatusText($"Attempt {connectionAttempts} failed");
                     CleanupRunner();
                     await Task.Delay(1000);
                 }
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[NetworkManager] Exception: {ex.Message}\n{ex.StackTrace}");
+                Debug.LogError($"[NetworkManager] Exception: {ex.Message}");
                 Events.RaiseSetStatusText($"Error: {ex.Message}");
                 CleanupRunner();
                 await Task.Delay(1000);
             }
         }
 
-        Events.RaiseSetStatusText("Connection failed after retries");
+        // All attempts failed
+        Debug.LogError("[NetworkManager] Connection failed after all retries");
+        Events.RaiseSetStatusText("Connection failed - Please retry");
         isConnecting = false;
-
-        // Show retry option
         Events.RaiseShowMenu(true);
     }
 
@@ -163,16 +194,13 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
 
         if (runner != null && runner.IsServer)
         {
-            // Server/Host restarts the match
             Events.RaiseMatchStart();
 
-            // Reset all players
             var players = FindObjectsOfType<PlayerController>();
             foreach (var p in players)
             {
                 if (p.Object != null && p.Object.HasStateAuthority)
                 {
-                    // Reset stats
                     p.Kills = 0;
                     p.Deaths = 0;
                     p.Health = p.maxHealth;
@@ -185,19 +213,18 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
         }
         else
         {
-            // Client requests restart via RPC (you can implement this)
-            Debug.Log("[NetworkManager] Client requesting restart...");
-            Events.RaiseSetStatusText("Restart requested...");
+            Debug.Log("[NetworkManager] Only host can restart");
+            Events.RaiseSetStatusText("Only host can restart");
         }
     }
 
-    private void OnLeaveClicked()
+    private async void OnLeaveClicked()
     {
         Debug.Log("[NetworkManager] Leave clicked");
 
         if (runner != null)
         {
-            runner.Shutdown();
+            await runner.Shutdown();
         }
 
         CleanupRunner();
@@ -205,7 +232,6 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
         Events.RaiseSetStatusText("Disconnected");
     }
 
-    // Input forwarding to network
     public void OnInput(NetworkRunner runnerRef, NetworkInput input)
     {
         var im = InputManager.Instance;
@@ -225,19 +251,16 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
     {
         Debug.Log($"[NetworkManager] Player {player.PlayerId} joined (IsServer: {runnerRef.IsServer})");
 
-        // Spawn player only on server/state authority
         if (runnerRef.IsServer)
         {
             Vector3 pos = Vector3.zero;
             Quaternion rot = Quaternion.identity;
 
-            // Get spawn point
             if (spawnPoints != null && spawnPoints.Length > 0)
             {
                 var sp = spawnPoints[UnityEngine.Random.Range(0, spawnPoints.Length)];
                 pos = sp.position;
 
-                // Calculate rotation to face center
                 Vector3 dirToCenter = (Vector3.zero - pos);
                 dirToCenter.y = 0;
                 if (dirToCenter.sqrMagnitude > 0.001f)
@@ -249,15 +272,22 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
             var playerObj = runnerRef.Spawn(playerPrefab, pos, rot, player);
             Debug.Log($"[NetworkManager] ✓ Spawned player {player.PlayerId} at {pos}");
 
-            // Start match when 2+ players present
+            // Start match when 2+ players
             if (runnerRef.ActivePlayers.Count() >= 2)
             {
-                Debug.Log("[NetworkManager] 2+ players detected - starting match");
-                Events.RaiseMatchStart();
+                Debug.Log("[NetworkManager] 2+ players - starting match");
+
+                // Small delay to ensure all clients are ready
+                Invoke(nameof(DelayedMatchStart), 0.5f);
             }
         }
 
         Events.RaiseSetStatusText($"Players: {runnerRef.ActivePlayers.Count()}");
+    }
+
+    private void DelayedMatchStart()
+    {
+        Events.RaiseMatchStart();
     }
 
     public void OnPlayerLeft(NetworkRunner runnerRef, PlayerRef player)
@@ -265,7 +295,6 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
         Debug.Log($"[NetworkManager] Player {player.PlayerId} left");
         Events.RaiseSetStatusText($"Players: {runnerRef.ActivePlayers.Count()}");
 
-        // End match if less than 2 players
         if (runnerRef.ActivePlayers.Count() < 2)
         {
             Debug.Log("[NetworkManager] Less than 2 players - ending match");
@@ -285,19 +314,19 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
     public void OnConnectedToServer(NetworkRunner runner)
     {
         Debug.Log("[NetworkManager] Connected to server");
-        Events.RaiseSetStatusText("Connected to server");
+        Events.RaiseSetStatusText("Connected!");
     }
 
     public void OnConnectFailed(NetworkRunner runner, NetAddress remoteAddress, NetConnectFailedReason reason)
     {
         Debug.LogError($"[NetworkManager] Connect failed: {reason}");
-        Events.RaiseSetStatusText($"Connection failed: {reason}");
+        Events.RaiseSetStatusText($"Failed: {reason}");
         isConnecting = false;
     }
 
     public void OnDisconnectedFromServer(NetworkRunner runner, NetDisconnectReason reason)
     {
-        Debug.LogWarning($"[NetworkManager] Disconnected from server: {reason}");
+        Debug.LogWarning($"[NetworkManager] Disconnected: {reason}");
         Events.RaiseSetStatusText($"Disconnected: {reason}");
         isConnecting = false;
     }
@@ -305,7 +334,10 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
     // Unused callbacks
     public void OnConnectRequest(NetworkRunner runner, NetworkRunnerCallbackArgs.ConnectRequest request, byte[] token) { }
     public void OnUserSimulationMessage(NetworkRunner runner, SimulationMessagePtr message) { }
-    public void OnSessionListUpdated(NetworkRunner runner, List<SessionInfo> sessionList) { }
+    public void OnSessionListUpdated(NetworkRunner runner, List<SessionInfo> sessionList)
+    {
+        Debug.Log($"[NetworkManager] Sessions found: {sessionList.Count}");
+    }
     public void OnCustomAuthenticationResponse(NetworkRunner runner, Dictionary<string, object> data) { }
     public void OnHostMigration(NetworkRunner runner, HostMigrationToken hostMigrationToken) { }
     public void OnReliableDataReceived(NetworkRunner runner, PlayerRef player, ReliableKey key, ArraySegment<byte> data) { }
@@ -315,8 +347,6 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
     public void OnInputMissing(NetworkRunner runner, PlayerRef player, NetworkInput input) { }
     public void OnObjectExitAOI(NetworkRunner runner, NetworkObject obj, PlayerRef player) { }
     public void OnObjectEnterAOI(NetworkRunner runner, NetworkObject obj, PlayerRef player) { }
-
-    // These are handled by OnPlayerJoined/OnPlayerLeft
     public void OnPlayerConnected(NetworkRunner runner, PlayerRef player) { }
     public void OnPlayerDisconnected(NetworkRunner runner, PlayerRef player) { }
     public void OnObjectSpawned(NetworkRunner runner, NetworkObject obj) { }

@@ -16,7 +16,7 @@ namespace Scripts.Gameplay
         [Networked] public Quaternion NetRotation { get; set; }
         [Networked] public TickTimer RespawnTimer { get; set; }
         [Networked] public bool IsDead { get; set; }
-        [Networked] public bool CombatEnabled { get; set; } // NOW NETWORKED!
+        [Networked] public bool CombatEnabled { get; set; }
 
         [Header("Movement")]
         public CharacterController characterController;
@@ -42,9 +42,8 @@ namespace Scripts.Gameplay
         private Renderer[] renderers;
         private Collider[] colliders;
 
-        // Client-side prediction
-        private Vector3 previousPosition;
-        private float positionErrorThreshold = 0.5f;
+        // FIX 1: Remove client-side prediction variables
+        // We'll use pure server authority with interpolation
 
         public override void Spawned()
         {
@@ -52,97 +51,72 @@ namespace Scripts.Gameplay
             Debug.Log($"[Player] Object ID: {Object.Id}");
             Debug.Log($"[Player] HasInputAuthority: {Object.HasInputAuthority}");
             Debug.Log($"[Player] HasStateAuthority: {Object.HasStateAuthority}");
-            Debug.Log($"[Player] InputAuthority: {Object.InputAuthority}");
-            Debug.Log($"[Player] Position: {transform.position}");
 
-            // Initialize components
             if (characterController == null)
             {
                 characterController = GetComponent<CharacterController>();
                 if (characterController == null)
                 {
-                    Debug.Log("[Player] Creating CharacterController component");
                     characterController = gameObject.AddComponent<CharacterController>();
                     characterController.center = Vector3.up * 0.9f;
                     characterController.height = 1.8f;
                     characterController.radius = 0.3f;
                 }
             }
-            Debug.Log($"[Player] CharacterController: {(characterController != null ? "OK" : "MISSING")}");
 
-            // Setup head transform
             headTransform = transform.Find("Head");
             if (headTransform == null)
             {
-                Debug.Log("[Player] Creating Head transform");
                 GameObject headObj = new GameObject("Head");
                 headTransform = headObj.transform;
                 headTransform.SetParent(transform);
                 headTransform.localPosition = new Vector3(0, 1.6f, 0);
-                headTransform.localRotation = Quaternion.identity;
             }
-            Debug.Log($"[Player] Head transform: {(headTransform != null ? "OK" : "MISSING")}");
 
-            // Setup fire point
             if (firePoint == null)
             {
-                Debug.Log("[Player] Setting up FirePoint");
                 var fp = transform.Find("FirePoint");
                 if (fp == null && gunPoint != null)
                 {
                     GameObject fpObj = new GameObject("FirePoint");
                     fpObj.transform.SetParent(gunPoint);
                     fpObj.transform.localPosition = new Vector3(0, 0, 0.5f);
-                    fpObj.transform.localRotation = Quaternion.identity;
                     firePoint = fpObj.transform;
                 }
                 else if (fp != null)
                     firePoint = fp;
                 else
                 {
-                    Debug.LogWarning("[Player] No gunPoint reference! Creating at root");
                     GameObject fpObj = new GameObject("FirePoint");
                     fpObj.transform.SetParent(transform);
                     fpObj.transform.localPosition = new Vector3(0, 1.6f, 0.5f);
-                    fpObj.transform.localRotation = Quaternion.identity;
                     firePoint = fpObj.transform;
                 }
             }
-            Debug.Log($"[Player] FirePoint: {(firePoint != null ? "OK at " + firePoint.position : "MISSING")}");
 
-            // Cache renderers and colliders
             renderers = GetComponentsInChildren<Renderer>(true);
             colliders = GetComponentsInChildren<Collider>(true);
-            Debug.Log($"[Player] Found {renderers.Length} renderers and {colliders.Length} colliders");
 
-            // Hide respawn countdown initially
             if (respawnCountdownText != null)
-            {
                 respawnCountdownText.gameObject.SetActive(false);
-                Debug.Log("[Player] Respawn countdown hidden");
-            }
 
-            // Initialize on State Authority (Server/Host)
+            // FIX 2: Initialize on State Authority
             if (Object.HasStateAuthority)
             {
-                Debug.Log("[Player] Initializing as STATE AUTHORITY (Server)");
                 Health = maxHealth;
                 Kills = 0;
                 Deaths = 0;
                 VerticalRotation = 0f;
                 IsDead = false;
-                CombatEnabled = false; // Start disabled, GameManager will enable
+                CombatEnabled = false;
                 PlayerName = PlayerPrefs.GetString("PlayerName", $"Player{Object.InputAuthority.PlayerId}");
-                Debug.Log($"[Player] Player name set to: {PlayerName}");
 
-                // Spawn at spawn point
                 var sps = FindObjectsOfType<SpawnPoint>();
                 if (sps.Length > 0)
                 {
                     var sp = sps[Random.Range(0, sps.Length)];
                     characterController.enabled = false;
                     transform.position = sp.transform.position;
-                    Debug.Log($"[Player] Set position to spawn point: {sp.transform.position}");
 
                     Vector3 dirToCenter = (Vector3.zero - transform.position);
                     dirToCenter.y = 0;
@@ -150,92 +124,67 @@ namespace Scripts.Gameplay
                     {
                         transform.rotation = Quaternion.LookRotation(dirToCenter.normalized, Vector3.up);
                     }
-
                     characterController.enabled = true;
                 }
-                else
-                {
-                    Debug.LogWarning("[Player] No spawn points found! Using default position");
-                }
 
+                // FIX 3: Initialize networked transform immediately
                 NetPosition = transform.position;
                 NetRotation = transform.rotation;
-                Debug.Log($"[Player] NetPosition initialized: {NetPosition}");
-            }
-            else
-            {
-                Debug.Log("[Player] Not state authority, will receive data from server");
             }
 
-            // Store initial position for prediction
-            previousPosition = transform.position;
-            Debug.Log($"[Player] Previous position set: {previousPosition}");
-
-            // Update UI for all clients
             if (nameText != null)
-            {
                 nameText.text = PlayerName.ToString();
-                Debug.Log($"[Player] Name text updated to: {PlayerName}");
-            }
 
             if (healthBar != null)
-            {
                 healthBar.fillAmount = 1f;
-                Debug.Log("[Player] Health bar set to full");
-            }
 
-            // Broadcast initial score
             if (Object.HasStateAuthority)
             {
                 RPC_BroadcastScore(PlayerName.ToString(), Kills);
-                Debug.Log($"[Player] Broadcasting initial score for {PlayerName}");
             }
 
-            Debug.Log($"[Player] ===== SPAWN COMPLETE at {transform.position} =====");
+            Debug.Log($"[Player] ===== SPAWN COMPLETE =====");
         }
 
         public override void FixedUpdateNetwork()
         {
-            // Handle state authority (server/host) - authoritative simulation
+            // FIX 4: Only server handles game logic, clients only interpolate
             if (Object.HasStateAuthority)
             {
-                HandleStateAuthority();
+                HandleServerAuthority();
             }
-
-            // Handle input authority (local player) - client-side prediction
-            if (Object.HasInputAuthority)
-            {
-                HandleLocalPlayer();
-            }
-            // Remote players - interpolate to network position
             else
             {
-                InterpolateRemotePlayer();
+                // FIX 5: All non-authority players (including input authority) just interpolate
+                InterpolateToNetworkState();
             }
         }
 
-        private void HandleStateAuthority()
+        private void HandleServerAuthority()
         {
-            // Handle respawn timer
+            // Handle respawn
             if (IsDead && RespawnTimer.Expired(Runner))
             {
                 Respawn();
+                return;
             }
 
-            // Process input from client if available
+            // Process input
             if (GetInput(out NetworkInputData data))
             {
                 if (!IsDead && characterController != null && characterController.enabled)
                 {
-                    // Server applies movement
+                    // Movement
                     Vector3 move = new Vector3(data.moveInput.x, 0, data.moveInput.y);
                     move = transform.TransformDirection(move);
                     move.y = 0;
 
                     characterController.Move(move * moveSpeed * Runner.DeltaTime);
+
+                    // FIX 6: Always update NetPosition after movement
                     NetPosition = transform.position;
 
-                    // Apply rotation
+                    // Rotation
                     if (Mathf.Abs(data.lookInput.x) > 0.01f)
                     {
                         float yaw = data.lookInput.x * rotationSpeed * Runner.DeltaTime;
@@ -250,12 +199,16 @@ namespace Scripts.Gameplay
                         VerticalRotation = Mathf.Clamp(VerticalRotation, -80f, 80f);
                     }
 
-                    // Fire handling
+                    // Fire
                     if (data.fire && CombatEnabled && !IsDead)
                     {
                         if (fireTimer.ExpiredOrNotRunning(Runner))
                         {
-                            Fire(firePoint.position, firePoint.forward);
+                            // FIX 7: Use actual firePoint position and forward
+                            Vector3 firePos = firePoint != null ? firePoint.position : (transform.position + Vector3.up * 1.6f);
+                            Vector3 fireDir = firePoint != null ? firePoint.forward : transform.forward;
+
+                            Fire(firePos, fireDir);
                             fireTimer = TickTimer.CreateFromSeconds(Runner, fireRate);
                         }
                     }
@@ -263,70 +216,38 @@ namespace Scripts.Gameplay
             }
         }
 
-        private void HandleLocalPlayer()
+        // FIX 8: Smooth interpolation for all remote players
+        private void InterpolateToNetworkState()
         {
-            if (!GetInput(out NetworkInputData data)) return;
-            if (IsDead) return;
-
-            // Client-side prediction for smooth movement
-            if (characterController != null && characterController.enabled)
+            if (characterController != null)
             {
-                Vector3 move = new Vector3(data.moveInput.x, 0, data.moveInput.y);
-                move = transform.TransformDirection(move);
-                move.y = 0;
-
-                previousPosition = transform.position;
-                characterController.Move(move * moveSpeed * Runner.DeltaTime);
-
-                // Apply rotation immediately for responsive feel
-                if (Mathf.Abs(data.lookInput.x) > 0.01f)
-                {
-                    float yaw = data.lookInput.x * rotationSpeed * Runner.DeltaTime;
-                    transform.Rotate(0, yaw, 0, Space.World);
-                }
-            }
-        }
-
-        private void InterpolateRemotePlayer()
-        {
-            // Smooth interpolation for remote players
-            if (Vector3.Distance(transform.position, NetPosition) > positionErrorThreshold)
-            {
-                // Large error, snap to network position
-                if (characterController != null)
-                    characterController.enabled = false;
-
-                transform.position = NetPosition;
-
-                if (characterController != null)
-                    characterController.enabled = true;
-            }
-            else
-            {
-                // Small error, smooth interpolation
-                Vector3 targetPos = Vector3.Lerp(transform.position, NetPosition, 15f * Runner.DeltaTime);
-                if (characterController != null && characterController.enabled)
-                {
-                    Vector3 delta = targetPos - transform.position;
-                    characterController.Move(delta);
-                }
+                // Disable CharacterController for interpolation
+                characterController.enabled = false;
             }
 
-            // Smooth rotation
-            transform.rotation = Quaternion.Slerp(transform.rotation, NetRotation, 15f * Runner.DeltaTime);
+            // Smooth position interpolation
+            transform.position = Vector3.Lerp(transform.position, NetPosition, 20f * Runner.DeltaTime);
+
+            // Smooth rotation interpolation
+            transform.rotation = Quaternion.Slerp(transform.rotation, NetRotation, 20f * Runner.DeltaTime);
+
+            if (characterController != null)
+            {
+                characterController.enabled = true;
+            }
         }
 
         private void Update()
         {
             if (Object == null) return;
 
-            // Update head rotation for all players
+            // Update head rotation
             if (headTransform != null)
             {
                 headTransform.localRotation = Quaternion.Euler(VerticalRotation, 0, 0);
             }
 
-            // Update respawn countdown for LOCAL dead player
+            // Update respawn countdown
             if (Object.HasInputAuthority && IsDead && respawnCountdownText != null)
             {
                 float timeLeft = RespawnTimer.RemainingTime(Runner) ?? 0f;
@@ -340,13 +261,8 @@ namespace Scripts.Gameplay
                     respawnCountdownText.gameObject.SetActive(false);
                 }
             }
-            else if (respawnCountdownText != null && respawnCountdownText.gameObject.activeSelf)
-            {
-                respawnCountdownText.gameObject.SetActive(false);
-            }
         }
 
-        // Server-side fire, then RPC to show visual to all
         private void Fire(Vector3 position, Vector3 direction)
         {
             if (!Object.HasStateAuthority || IsDead || !CombatEnabled) return;
@@ -369,9 +285,7 @@ namespace Scripts.Gameplay
             if (proj != null)
             {
                 proj.Fire(Object.InputAuthority, position, direction);
-                Debug.Log($"[Player] {PlayerName} fired projectile");
-
-                // Notify all clients to show fire visual/sound
+                Debug.Log($"[Player] {PlayerName} fired from {position} dir {direction}");
                 RPC_OnFireVisual();
             }
         }
@@ -379,7 +293,6 @@ namespace Scripts.Gameplay
         [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
         private void RPC_OnFireVisual()
         {
-            // Add muzzle flash, sound effects, etc. here
             Debug.Log($"[Player] Fire visual for {PlayerName}");
         }
 
@@ -390,51 +303,45 @@ namespace Scripts.Gameplay
 
             Health -= dmg;
 
-            // Update health bar on all clients
             if (healthBar != null)
                 healthBar.fillAmount = (float)Health / maxHealth;
 
             Debug.Log($"[Player] {PlayerName} took {dmg} damage. Health: {Health}");
 
-            // Handle death
             if (Health <= 0 && Object.HasStateAuthority)
             {
                 Health = 0;
                 IsDead = true;
                 Deaths++;
 
-                // Hide player on all clients
                 RPC_SetVisible(false);
 
-                // Award kill to attacker
                 if (Runner.TryGetPlayerObject(attacker, out NetworkObject attackerObj))
                 {
                     var attackerPC = attackerObj.GetComponent<PlayerController>();
                     if (attackerPC != null && attackerPC != this)
                     {
                         attackerPC.Kills++;
+                        // FIX 9: Broadcast score update
                         attackerPC.RPC_BroadcastScore(attackerPC.PlayerName.ToString(), attackerPC.Kills);
-                        Debug.Log($"[Player] {attackerPC.PlayerName} got a kill! Total: {attackerPC.Kills}");
                     }
                 }
 
-                // Start respawn timer
                 RespawnTimer = TickTimer.CreateFromSeconds(Runner, 2f);
-                Debug.Log($"[Player] {PlayerName} died! Respawning in 2s");
             }
         }
 
         [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
         public void RPC_BroadcastScore(NetworkString<_16> pName, int kills)
         {
+            // FIX 10: Ensure event is raised on all clients
             Events.RaiseUpdateScore(pName.ToString(), kills);
-            Debug.Log($"[Player] Broadcasting score: {pName} - {kills} kills");
+            Debug.Log($"[Player] Score broadcast received: {pName} - {kills} kills");
         }
 
         [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
         private void RPC_SetVisible(bool visible)
         {
-            // Toggle renderers
             if (renderers != null)
             {
                 foreach (var r in renderers)
@@ -444,7 +351,6 @@ namespace Scripts.Gameplay
                 }
             }
 
-            // Toggle colliders
             if (colliders != null)
             {
                 foreach (var c in colliders)
@@ -454,30 +360,22 @@ namespace Scripts.Gameplay
                 }
             }
 
-            // Keep character controller enabled
             if (characterController != null)
                 characterController.enabled = true;
 
-            // Toggle UI (except respawn countdown for local player)
             if (playerCanvas != null)
                 playerCanvas.enabled = visible;
-
-            Debug.Log($"[Player] {PlayerName} visibility set to {visible}");
         }
 
         private void Respawn()
         {
             if (!Object.HasStateAuthority) return;
 
-            Debug.Log($"[Player] Respawning {PlayerName}");
-
-            // Reset health and state
             Health = maxHealth;
             IsDead = false;
             VerticalRotation = 0f;
             RespawnTimer = TickTimer.None;
 
-            // Find spawn point
             var sps = FindObjectsOfType<SpawnPoint>();
             if (sps.Length > 0)
             {
@@ -502,12 +400,9 @@ namespace Scripts.Gameplay
                     characterController.enabled = true;
             }
 
-            // Update networked transform
             NetPosition = transform.position;
             NetRotation = transform.rotation;
-            previousPosition = transform.position;
 
-            // Show player and update health bar on all clients
             RPC_SetVisible(true);
             RPC_UpdateHealthBar();
         }
