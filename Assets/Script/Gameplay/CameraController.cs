@@ -95,13 +95,13 @@ namespace Scripts.Gameplay
             // Get firePoint if we don't have it
             if (firePoint == null && player != null && player.headTransform != null)
             {
-                firePoint = player.headTransform.Find("FirePoint");
+                firePoint = player.transform.Find("FirePoint");
             }
 
             if (firePoint == null)
             {
                 crosshair.enabled = false;
-                return;
+                return; 
             }
 
             // Raycast from firePoint forward

@@ -76,7 +76,7 @@ namespace Scripts.Gameplay
             if (!IsActive) return;
 
             // Move forward using velocity
-            rb.velocity = transform.forward * speed;
+            rb.linearVelocity = transform.forward * speed;
 
             // Check lifetime
             if (LifeTimer.Expired(Runner))
@@ -106,7 +106,7 @@ namespace Scripts.Gameplay
             gameObject.SetActive(true);
 
             // Reset physics
-            rb.velocity = direction.normalized * speed;
+            rb.linearVelocity = direction.normalized * speed;
             rb.angularVelocity = Vector3.zero;
 
             // Enable visuals
@@ -132,7 +132,7 @@ namespace Scripts.Gameplay
             gameObject.SetActive(false);
 
             // Stop physics
-            rb.velocity = Vector3.zero;
+            rb.linearVelocity = Vector3.zero;
             rb.angularVelocity = Vector3.zero;
 
             // Disable visuals

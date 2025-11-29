@@ -34,7 +34,7 @@ namespace Scripts.Gameplay
 
         private bool combatEnabled = false;
         public Transform headTransform;
-
+        public Transform gunPoint;
         public override void Spawned()
         {
             Debug.Log($"[Player] Spawned at {transform.position}");
@@ -74,12 +74,12 @@ namespace Scripts.Gameplay
             }
 
             // Create FirePoint
-            firePoint = headTransform.Find("FirePoint");
+            firePoint = transform.Find("FirePoint");
             if (firePoint == null)
             {
                 GameObject fpObj = new GameObject("FirePoint");
                 firePoint = fpObj.transform;
-                firePoint.SetParent(headTransform);
+                firePoint.SetParent(gunPoint);
                 firePoint.localPosition = new Vector3(0, 0, 0.5f);
                 firePoint.localRotation = Quaternion.identity;
             }
