@@ -1,16 +1,14 @@
 using UnityEngine;
-using Fusion;
 using UnityEngine.UI;
 
 namespace Scripts.Gameplay
 {
-    /// ===== FIXED: First-person camera with raycast aiming =====
     public class CameraController : MonoBehaviour
     {
         [Header("Camera Settings")]
         public Transform target;
-        public float distance = 0.1f;  // Close to player for FPS feel
-        public float height = 0.6f;    // Eye level height
+        public float distance = 2f;
+        public float height = 1.2f;
         public float smoothSpeed = 8f;
 
         [Header("Aiming")]
@@ -22,53 +20,95 @@ namespace Scripts.Gameplay
 
         private Vector3 offset;
         private Vector3 desiredPosition;
-        private NetworkObject networkObject;
         private Camera mainCam;
+        public PlayerController player;
+        private bool targetAssigned = false;
 
         private void Start()
         {
-            networkObject = GetComponent<NetworkObject>();
             mainCam = GetComponent<Camera>();
             if (mainCam == null)
                 mainCam = Camera.main;
 
-            offset = new Vector3(0, height, distance);
-
-            Debug.Log("[CameraController] Started - FPS mode enabled");
+            Debug.Log("[CameraController] Started - Waiting for player to spawn...");
         }
 
         private void LateUpdate()
         {
-            // ===== Only update for input authority (local player) =====
-            if (networkObject != null && !networkObject.HasInputAuthority)
-                return;
+            // ===== AUTO-FIND TARGET IF NOT ASSIGNED =====
+            if (!targetAssigned)
+            {
+                FindLocalPlayer();
+                if (target == null)
+                    return;
+                targetAssigned = true;
+            }
 
             if (target == null)
                 return;
 
-            // ===== UPDATE CAMERA POSITION (First-person style, close to player) =====
-            desiredPosition = target.position + target.TransformDirection(offset);
-
-            transform.position = Vector3.Lerp(
-                transform.position,
-                desiredPosition,
-                smoothSpeed * Time.deltaTime
+            // ===== UPDATE CAMERA POSITION (Third-person, behind player) =====
+            float horizontal = target.eulerAngles.y * Mathf.Deg2Rad;
+            offset = new Vector3(
+                Mathf.Sin(horizontal) * distance,
+                height,
+                Mathf.Cos(horizontal) * distance
             );
 
-            // ===== CAMERA LOOKS FORWARD (aligned with player direction) =====
-            Vector3 lookForward = target.position + target.forward * 10f;
-            transform.LookAt(lookForward);
+            desiredPosition = target.position + offset;
+            transform.position = Vector3.Lerp(transform.position, desiredPosition, smoothSpeed * Time.deltaTime);
 
-            // ===== UPDATE CROSSHAIR WITH RAYCAST =====
+            // ===== CAMERA LOOKS AT PLAYER =====
+            Vector3 lookTarget = target.position + Vector3.up * 0.6f;
+            transform.LookAt(lookTarget);
+
             UpdateCrosshair();
+        }
+
+        // ===== AUTO-FIND LOCAL PLAYER =====
+        private void FindLocalPlayer()
+        {
+            var allPlayers = FindObjectsOfType<PlayerController>();
+
+            foreach (var p in allPlayers)
+            {
+                if (p.Object.HasInputAuthority)
+                {
+                    target = p.transform;
+                    player = p;
+
+                    // Also find firePoint
+                    Transform head = p.transform.Find("Head");
+                    if (head != null)
+                    {
+                        firePoint = head.Find("FirePoint");
+                        Debug.Log($"[CameraController] Found local player: {p.gameObject.name}, firePoint: {firePoint.name}");
+                    }
+
+                    return;
+                }
+            }
         }
 
         private void UpdateCrosshair()
         {
-            if (crosshair == null || firePoint == null)
+            if (crosshair == null)
                 return;
 
-            // ===== RAYCAST FROM FIREPOINT =====
+            // Find firePoint from player if not already assigned
+            if (firePoint == null && player != null)
+            {
+                Transform head = player.transform.Find("Head");
+                if (head != null)
+                {
+                    firePoint = head.Find("FirePoint");
+                    Debug.Log($"[CameraController] Found firePoint: {firePoint.name}");
+                }
+            }
+
+            if (firePoint == null)
+                return;
+
             Ray ray = new Ray(firePoint.position, firePoint.forward);
             RaycastHit hit;
 
@@ -76,49 +116,31 @@ namespace Scripts.Gameplay
 
             if (hitSomething)
             {
-                // ===== HIT SOMETHING - MOVE CROSSHAIR TO HIT POINT =====
                 Vector3 hitWorldPos = hit.point;
                 Vector3 crosshairScreenPos = mainCam.WorldToScreenPoint(hitWorldPos);
 
-                // Update crosshair position
                 RectTransform crosshairRect = crosshair.GetComponent<RectTransform>();
                 if (crosshairRect != null)
-                {
                     crosshairRect.position = crosshairScreenPos;
-                }
 
-                // Check if hit is a player
                 PlayerController playerHit = hit.collider.GetComponent<PlayerController>();
-                if (playerHit != null)
-                {
-                    crosshair.color = hitColor;  // Red for enemy
-                }
-                else
-                {
-                    crosshair.color = normalColor;  // White for environment
-                }
-
+                crosshair.color = playerHit != null ? hitColor : normalColor;
                 crosshair.enabled = true;
 
-                // Debug line
                 Debug.DrawLine(firePoint.position, hit.point, Color.red);
             }
             else
             {
-                // ===== HIT NOTHING - MOVE CROSSHAIR TO MAX DISTANCE =====
                 Vector3 maxDistancePoint = firePoint.position + firePoint.forward * raycastDistance;
                 Vector3 crosshairScreenPos = mainCam.WorldToScreenPoint(maxDistancePoint);
 
                 RectTransform crosshairRect = crosshair.GetComponent<RectTransform>();
                 if (crosshairRect != null)
-                {
                     crosshairRect.position = crosshairScreenPos;
-                }
 
-                crosshair.color = normalColor;  // White
+                crosshair.color = normalColor;
                 crosshair.enabled = true;
 
-                // Debug line
                 Debug.DrawLine(firePoint.position, maxDistancePoint, Color.white);
             }
         }

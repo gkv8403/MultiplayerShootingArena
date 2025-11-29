@@ -1,11 +1,12 @@
 using UnityEngine;
 using Fusion;
+using System;
 
-/// ===== NEW: Centralized game state manager =====
-/// This ensures both host and client have synchronized UI states
 public class GameStateManager : MonoBehaviour
 {
     public static GameStateManager Instance { get; private set; }
+
+    public event Action<NetworkRunner> OnRunnerSpawned;
 
     [SerializeField] private NetworkRunner runner;
 
@@ -13,10 +14,10 @@ public class GameStateManager : MonoBehaviour
 
     public enum GameState
     {
-        Menu,        // Join menu visible
-        Connecting,  // Connecting to session
-        InGame,      // Game running - show controls
-        GameOver     // Match ended
+        Menu,
+        Connecting,
+        InGame,
+        GameOver
     }
 
     private void Awake()
@@ -27,6 +28,8 @@ public class GameStateManager : MonoBehaviour
             return;
         }
         Instance = this;
+        DontDestroyOnLoad(gameObject);
+        Debug.Log("[GameStateManager] Initialized as singleton");
     }
 
     private void Start()
@@ -56,13 +59,13 @@ public class GameStateManager : MonoBehaviour
 
     private void OnMatchStart()
     {
-        Debug.Log("[GameStateManager] Match started - showing game UI");
+        Debug.Log("[GameStateManager] Match started");
         SetGameState(GameState.InGame);
     }
 
     private void OnMatchEnd()
     {
-        Debug.Log("[GameStateManager] Match ended - showing game over");
+        Debug.Log("[GameStateManager] Match ended");
         SetGameState(GameState.GameOver);
     }
 
@@ -77,9 +80,8 @@ public class GameStateManager : MonoBehaviour
             return;
 
         currentState = newState;
-        Debug.Log($"[GameStateManager] State changed to: {newState}");
+        Debug.Log($"[GameStateManager] State: {newState}");
 
-        // Update UI based on state
         switch (newState)
         {
             case GameState.Menu:
@@ -87,12 +89,12 @@ public class GameStateManager : MonoBehaviour
                 break;
 
             case GameState.Connecting:
-                Events.RaiseShowMenu(true); // Keep menu visible during connection
+                Events.RaiseShowMenu(true);
                 Events.RaiseSetStatusText("Connecting...");
                 break;
 
             case GameState.InGame:
-                Events.RaiseShowMenu(false); // Hide menu
+                Events.RaiseShowMenu(false);
                 Events.RaiseSetStatusText("Match Running");
                 break;
 
@@ -102,8 +104,11 @@ public class GameStateManager : MonoBehaviour
         }
     }
 
-    public GameState GetCurrentState()
+    public void NotifyRunnerSpawned(NetworkRunner newRunner)
     {
-        return currentState;
+        Debug.Log("[GameStateManager] Runner spawned - notifying subscribers");
+        OnRunnerSpawned?.Invoke(newRunner);
     }
+
+    public GameState GetCurrentState() => currentState;
 }

@@ -10,23 +10,23 @@ public static class Events
     public static event Action OnLeaveClicked;
 
     // UI -> InputManager (touch & button inputs)
-    public static event Action<Vector2> OnMoveInput; // vector normalized
+    public static event Action<Vector2> OnMoveInput;
     public static event Action OnMoveInputStop;
-    public static event Action<Vector2> OnLookDelta; // screen delta
+    public static event Action<Vector2> OnLookDelta;
     public static event Action OnFireDown;
     public static event Action OnFireUp;
 
     // Network/Game -> UI
     public static event Action<string> OnSetStatusText;
-    public static event Action<bool> OnShowMenu; // show/hide join menu
+    public static event Action<bool> OnShowMenu;
     public static event Action OnShowGameOver;
-    public static event Action<string, int> OnUpdateScore; // playerName, kills
+    public static event Action<string, int> OnUpdateScore;
 
     // Game -> others
     public static event Action OnMatchStart;
     public static event Action OnMatchEnd;
 
-    // Helper invokers (avoid null checks outside)
+    // Invokers
     public static void RaiseHostClicked() => OnHostClicked?.Invoke();
     public static void RaiseQuickJoinClicked() => OnQuickJoinClicked?.Invoke();
     public static void RaiseRestartClicked() => OnRestartClicked?.Invoke();

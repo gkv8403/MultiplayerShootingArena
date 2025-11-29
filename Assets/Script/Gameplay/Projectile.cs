@@ -13,22 +13,18 @@ namespace Scripts.Gameplay
         public int damage = 20;
         public float lifetime = 3f;
 
-        private Rigidbody rb;
-
         public override void Spawned()
         {
-            rb = GetComponent<Rigidbody>();
-            // Ensure not active on spawn
             IsActive = false;
+            Debug.Log("[Projectile] Spawned");
         }
 
         public override void FixedUpdateNetwork()
         {
             if (!Object.HasStateAuthority) return;
-
             if (!IsActive) return;
 
-            // Move forward by setting transform on server
+            // Move forward
             transform.position += transform.forward * speed * Runner.DeltaTime;
 
             if (LifeTimer.Expired(Runner))
@@ -37,17 +33,18 @@ namespace Scripts.Gameplay
             }
         }
 
-        // Called by server when allocating pooled projectile
         public void Activate(PlayerRef owner, Vector3 direction)
         {
             if (!Runner.IsServer) return;
+
             Owner = owner;
             IsActive = true;
             LifeTimer = TickTimer.CreateFromSeconds(Runner, lifetime);
 
-            // align forward to given direction
             if (direction.sqrMagnitude > 0.001f)
                 transform.forward = direction;
+
+            Debug.Log("[Projectile] Activated");
         }
 
         private void Deactivate()
@@ -55,8 +52,8 @@ namespace Scripts.Gameplay
             if (!Runner.IsServer) return;
             IsActive = false;
             Owner = PlayerRef.Invalid;
-            // move it out of the way
             transform.position = Vector3.zero;
+            Debug.Log("[Projectile] Deactivated");
         }
 
         private void OnTriggerEnter(Collider other)
@@ -66,17 +63,19 @@ namespace Scripts.Gameplay
 
             if (other.TryGetComponent<PlayerController>(out var pc))
             {
-                // don't hit owner
                 if (pc.Object.InputAuthority != Owner)
                 {
                     pc.RPC_TakeDamage(damage, Owner);
                     Deactivate();
+                    Debug.Log("[Projectile] Hit player!");
                 }
             }
             else if (other.CompareTag("Environment"))
             {
                 Deactivate();
+                Debug.Log("[Projectile] Hit environment!");
             }
         }
     }
 }
+

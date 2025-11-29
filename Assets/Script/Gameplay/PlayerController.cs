@@ -2,6 +2,7 @@ using Fusion;
 using UnityEngine;
 using TMPro;
 using UnityEngine.UI;
+using System.Collections;
 
 namespace Scripts.Gameplay
 {
@@ -31,7 +32,7 @@ namespace Scripts.Gameplay
         public int maxHealth = 100;
         [Networked] public TickTimer RespawnTimer { get; set; }
 
-        private bool hasInitializedInput = false;
+        private bool combatEnabled = false;
 
         public override void Spawned()
         {
@@ -49,33 +50,40 @@ namespace Scripts.Gameplay
             if (nameText != null)
                 nameText.text = PlayerName.ToString();
 
-            // ===== FIX: Only setup camera for input authority =====
-            if (Object.HasInputAuthority)
-            {
-                var cam = Camera.main;
-                if (cam != null)
-                {
-                    var camController = cam.GetComponent<CameraController>();
-                    if (camController == null)
-                        camController = cam.gameObject.AddComponent<CameraController>();
-                    camController.target = transform;
-                    Debug.Log("[Player] Camera controller assigned");
-                }
-            }
-
+            // Get or create CharacterController
             if (characterController == null)
             {
                 characterController = GetComponent<CharacterController>();
                 if (characterController == null)
-                    Debug.LogError("[Player] CharacterController not found!");
+                {
+                    characterController = gameObject.AddComponent<CharacterController>();
+                    characterController.center = Vector3.up * 0.6f;
+                    characterController.height = 1.8f;
+                    characterController.radius = 0.3f;
+                    characterController.slopeLimit = 45f;
+                    characterController.stepOffset = 0.3f;
+                }
             }
 
-            hasInitializedInput = true;
+            if (characterController != null)
+            {
+                characterController.enabled = true;
+                Debug.Log("[Player] CharacterController ready");
+            }
+
+            // ===== CAMERA WILL AUTO-FIND THIS PLAYER =====
+            // No need to manually setup - CameraController.FindLocalPlayer() will find it
+            if (Object.HasInputAuthority)
+            {
+                Debug.Log("[Player] This is the local player - camera will auto-find");
+            }
+
+            Debug.Log("[Player] Spawned complete");
         }
 
         public override void FixedUpdateNetwork()
         {
-            // ===== Only process input on input authority =====
+            // Only process input on input authority (local player)
             if (!Object.HasInputAuthority)
                 return;
 
@@ -88,27 +96,28 @@ namespace Scripts.Gameplay
             if (Health <= 0)
                 return;
 
-            // ===== MOVEMENT =====
+            // ===== MOVEMENT - Only XZ, never modify Y =====
             if (characterController != null && characterController.enabled)
             {
                 Vector3 move = new Vector3(data.moveInput.x, 0, data.moveInput.y);
                 move = transform.TransformDirection(move);
+                move.y = 0; // Force Y to zero - no vertical movement
                 characterController.Move(move * moveSpeed * Runner.DeltaTime);
             }
 
-            // ===== ROTATION =====
-            if (data.lookInput.sqrMagnitude > 0.01f)
+            // ===== ROTATION - Horizontal look only =====
+            if (data.lookInput.x != 0)
             {
                 float yaw = data.lookInput.x * rotationSpeed * Runner.DeltaTime;
                 transform.Rotate(0, yaw, 0);
             }
 
-            // ===== FIRE - SEND RPC =====
-            if (data.fire)
+            // ===== FIRE =====
+            if (data.fire && combatEnabled)
             {
                 if (fireTimer.ExpiredOrNotRunning(Runner))
                 {
-                    Debug.Log("[Player] Fire input received - calling RPC_Fire");
+                    Debug.Log("[Player] Fire input - calling RPC_Fire");
                     RPC_Fire();
                     fireTimer = TickTimer.CreateFromSeconds(Runner, fireRate);
                 }
@@ -124,92 +133,79 @@ namespace Scripts.Gameplay
                 if (sps.Length > 0)
                 {
                     var sp = sps[Random.Range(0, sps.Length)];
-                    transform.position = sp.transform.position + Vector3.up * 1f;
+
+                    // Reset controller
+                    if (characterController != null)
+                        characterController.enabled = false;
+
+                    transform.position = sp.transform.position;
                     transform.rotation = sp.transform.rotation;
+
+                    if (characterController != null)
+                        characterController.enabled = true;
                 }
 
                 RespawnTimer = TickTimer.None;
+                Debug.Log("[Player] Respawned");
             }
         }
 
-        // ===== RPC: FIRED BY INPUT AUTHORITY, EXECUTED ON STATE AUTHORITY =====
         [Rpc(RpcSources.InputAuthority, RpcTargets.StateAuthority)]
         public void RPC_Fire()
         {
-            Debug.Log($"[RPC_Fire] Called. HasStateAuthority: {Object.HasStateAuthority}, HasInputAuthority: {Object.HasInputAuthority}");
+            Debug.Log($"[RPC_Fire] Called on authority: {Object.HasStateAuthority}");
 
             if (!Object.HasStateAuthority)
             {
-                Debug.LogError("[RPC_Fire] ERROR: RPC executed on non-authority!");
+                Debug.LogError("[RPC_Fire] ERROR: Not state authority!");
                 return;
             }
 
-            Debug.Log("[RPC_Fire] Executing on state authority - spawning projectile");
+            if (firePoint == null)
+            {
+                Debug.LogError("[RPC_Fire] ERROR: firePoint is NULL!");
+                return;
+            }
 
-            // ===== GET POOL =====
             var pool = FindObjectOfType<NetworkProjectilePool>();
             if (pool == null)
             {
-                Debug.LogError("[RPC_Fire] ERROR: ProjectilePool not found in scene!");
+                Debug.LogError("[RPC_Fire] ERROR: Pool not found!");
                 return;
             }
 
-            Debug.Log("[RPC_Fire] Pool found");
-
-            // ===== GET PROJECTILE =====
             var pooledProjectile = pool.GetPooledProjectile();
             if (pooledProjectile == null)
             {
-                Debug.LogError("[RPC_Fire] ERROR: No projectile available from pool!");
+                Debug.LogError("[RPC_Fire] ERROR: No projectile from pool!");
                 return;
             }
 
-            Debug.Log($"[RPC_Fire] Got projectile from pool: {pooledProjectile.gameObject.name}");
-
-            // ===== GET PROJECTILE COMPONENT =====
             var projectile = pooledProjectile.GetComponent<Projectile>();
             if (projectile == null)
             {
-                Debug.LogError("[RPC_Fire] ERROR: Projectile component not found on pooled object!");
+                Debug.LogError("[RPC_Fire] ERROR: Projectile component missing!");
                 return;
             }
 
-            // ===== CHECK FIREPOINT =====
-            if (firePoint == null)
-            {
-                Debug.LogError("[RPC_Fire] ERROR: firePoint is NULL! Cannot fire!");
-                return;
-            }
-
-            Debug.Log($"[RPC_Fire] FirePoint found at position: {firePoint.position}");
-
-            // ===== SETUP PROJECTILE =====
             pooledProjectile.transform.position = firePoint.position;
             pooledProjectile.transform.rotation = firePoint.rotation;
+            projectile.Activate(Object.InputAuthority, firePoint.forward);
 
-            Debug.Log($"[RPC_Fire] Projectile positioned at {firePoint.position}");
-
-            // ===== ACTIVATE PROJECTILE =====
-            projectile.Activate(Object.InputAuthority, transform.forward);
-
-            Debug.Log($"[RPC_Fire] Projectile activated - will move forward");
+            Debug.Log($"[RPC_Fire] Projectile fired from {firePoint.position}");
         }
 
-        // ===== DAMAGE RPC =====
         [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
         public void RPC_TakeDamage(int dmg, PlayerRef attacker)
         {
             if (!Object.HasStateAuthority) return;
-
             if (Health <= 0) return;
 
             Health -= dmg;
             Debug.Log($"[Player] {PlayerName} took {dmg} damage. Health: {Health}");
 
             if (healthBar != null)
-            {
                 healthBar.fillAmount = (float)Health / maxHealth;
-            }
 
             if (Health <= 0)
             {
@@ -235,8 +231,10 @@ namespace Scripts.Gameplay
 
         public void EnableCombat(bool enable)
         {
+            combatEnabled = enable;
             if (firePoint != null)
                 firePoint.gameObject.SetActive(enable);
+            Debug.Log($"[Player] Combat enabled: {enable}");
         }
     }
 

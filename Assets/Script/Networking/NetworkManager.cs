@@ -5,7 +5,6 @@ using System.Linq;
 using UnityEngine;
 using Scripts.Gameplay;
 
-// ===== FIXED V2: Ensures client UI updates correctly =====
 public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
 {
     public NetworkRunner runnerPrefab;
@@ -25,7 +24,6 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
         Events.OnRestartClicked += OnRestartClicked;
         Events.OnLeaveClicked += OnLeaveClicked;
 
-        // ===== FIX: Start with menu visible =====
         Events.RaiseShowMenu(true);
         Events.RaiseSetStatusText("Ready");
         Debug.Log("[NetworkManager] Started, showing menu");
@@ -78,8 +76,11 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
         }
 
         isConnecting = false;
-        Events.RaiseSetStatusText(makeHost ? "Host started" : "Joined match");
         Debug.Log("[NetworkManager] Session started successfully");
+
+        // Notify GameStateManager and pool that runner is ready
+        if (GameStateManager.Instance != null)
+            GameStateManager.Instance.NotifyRunnerSpawned(runner);
     }
 
     private void OnRestartClicked()
@@ -94,13 +95,12 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
         if (runner != null) runner.Shutdown();
     }
 
-    // ===== INetworkRunnerCallbacks =====
     public void OnInput(NetworkRunner runnerRef, NetworkInput input)
     {
         var im = InputManager.Instance;
         if (im == null) return;
 
-        var data = new Scripts.Gameplay.NetworkInputData
+        var data = new NetworkInputData
         {
             moveInput = im.CurrentMoveInput,
             lookInput = im.CurrentLookDelta,
@@ -123,15 +123,14 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
             if (spawnPoints != null && spawnPoints.Length > 0)
             {
                 var sp = spawnPoints[Random.Range(0, spawnPoints.Length)];
-                pos = sp.position + Vector3.up * 0.5f;
+                pos = sp.position;
                 rot = sp.rotation;
                 Debug.Log($"[NetworkManager] Spawning at: {sp.name} ({pos})");
             }
 
             var no = runnerRef.Spawn(playerPrefab, pos, rot, player);
-            Debug.Log($"[NetworkManager] Spawned player {player.PlayerId}");
+            Debug.Log($"[NetworkManager] Spawned player {player.PlayerId} at {pos}");
 
-            // ===== FIX V2: Check if enough players and start match =====
             if (runnerRef.ActivePlayers.Count() >= 2)
             {
                 Debug.Log("[NetworkManager] 2+ players reached - starting match");
@@ -140,11 +139,10 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
         }
         else
         {
-            // ===== FIX V2: For CLIENT - also check and trigger match start =====
             Debug.Log($"[NetworkManager] Client sees {runnerRef.ActivePlayers.Count()} active players");
             if (runnerRef.ActivePlayers.Count() >= 2)
             {
-                Debug.Log("[NetworkManager] CLIENT: 2+ players - should start match");
+                Debug.Log("[NetworkManager] CLIENT: 2+ players - starting match");
                 Events.RaiseMatchStart();
             }
         }
@@ -177,7 +175,6 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
         }
     }
 
-    // Stubbed callbacks
     public void OnConnectedToServer(NetworkRunner runner) { }
     public void OnConnectRequest(NetworkRunner runner, NetworkRunnerCallbackArgs.ConnectRequest request, byte[] token) { }
     public void OnConnectFailed(NetworkRunner runner, NetAddress remoteAddress, NetConnectFailedReason reason)
@@ -187,8 +184,8 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
         isConnecting = false;
     }
     public void OnUserSimulationMessage(NetworkRunner runner, SimulationMessagePtr message) { }
-    public void OnSessionListUpdated(NetworkRunner runner, System.Collections.Generic.List<SessionInfo> sessionList) { }
-    public void OnCustomAuthenticationResponse(NetworkRunner runner, System.Collections.Generic.Dictionary<string, object> data) { }
+    public void OnSessionListUpdated(NetworkRunner runner, List<SessionInfo> sessionList) { }
+    public void OnCustomAuthenticationResponse(NetworkRunner runner, Dictionary<string, object> data) { }
     public void OnHostMigration(NetworkRunner runner, HostMigrationToken hostMigrationToken) { }
     public void OnReliableDataReceived(NetworkRunner runner, PlayerRef player, ReliableKey key, System.ArraySegment<byte> data) { }
     public void OnReliableDataProgress(NetworkRunner runner, PlayerRef player, ReliableKey key, float progress) { }
@@ -199,7 +196,6 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
     public void OnObjectSpawned(NetworkRunner runner, NetworkObject obj) { }
     public void OnObjectDestroyed(NetworkRunner runner, NetworkObject obj) { }
     public void OnInputMissing(NetworkRunner runner, PlayerRef player, NetworkInput input) { }
-    public void OnConnectedToServer(NetworkRunner runner, NetAddress remoteAddress) { }
     public void OnObjectExitAOI(NetworkRunner runner, NetworkObject obj, PlayerRef player) { }
     public void OnObjectEnterAOI(NetworkRunner runner, NetworkObject obj, PlayerRef player) { }
     public void OnDisconnectedFromServer(NetworkRunner runner, NetDisconnectReason reason)

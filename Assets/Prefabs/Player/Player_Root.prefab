@@ -226,7 +226,7 @@ GameObject:
   - component: {fileID: 2940337162563095911}
   - component: {fileID: 1471826421702585868}
   - component: {fileID: 8699331861144923163}
-  - component: {fileID: 9005332424923039900}
+  - component: {fileID: 1197398385694940201}
   m_Layer: 0
   m_Name: Player_Root
   m_TagString: Untagged
@@ -369,27 +369,29 @@ Rigidbody:
   m_Interpolate: 0
   m_Constraints: 0
   m_CollisionDetection: 0
---- !u!114 &9005332424923039900
-MonoBehaviour:
+--- !u!136 &1197398385694940201
+CapsuleCollider:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 3037732698713312823}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
   m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 9859fdc32983c774e885a4063a3e0599, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  target: {fileID: 4204624677834652139}
-  distance: 0.1
-  height: 0.6
-  smoothSpeed: 8
-  firePoint: {fileID: 7345749386799225587}
-  raycastDistance: 100
-  crosshair: {fileID: 1660863089637004848, guid: 20e24ae0c35ad8f4aa9e3fffc13db449, type: 3}
-  hitColor: {r: 1, g: 0, b: 0, a: 1}
-  normalColor: {r: 1, g: 1, b: 1, a: 1}
+  serializedVersion: 2
+  m_Radius: 0.5
+  m_Height: 2.1558013
+  m_Direction: 1
+  m_Center: {x: 0, y: -0.07528472, z: 0}
 --- !u!1 &3329855015857730744
 GameObject:
   m_ObjectHideFlags: 0
@@ -403,7 +405,7 @@ GameObject:
   - component: {fileID: 3059920631482220820}
   - component: {fileID: 3158836958933392773}
   m_Layer: 0
-  m_Name: Cube
+  m_Name: Head
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0

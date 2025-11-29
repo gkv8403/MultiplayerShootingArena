@@ -3,7 +3,6 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
-// ===== FIXED V2: Proper UI state management for host and client =====
 public class UIManager : MonoBehaviour
 {
     [Header("Panels")]
@@ -31,13 +30,12 @@ public class UIManager : MonoBehaviour
     public RectTransform lookArea;
     public Image crosshair;
 
-    // ===== Track panel states =====
     private bool menuVisible = true;
     private bool gameplayVisible = false;
 
     private void Awake()
     {
-        // ===== FIX V2: Initialize all panels with proper state =====
+        // Initialize all panels
         if (joinPanel != null) joinPanel.SetActive(true);
         if (scorePanel != null) scorePanel.SetActive(false);
         if (gameOverPanel != null) gameOverPanel.SetActive(false);
@@ -59,10 +57,16 @@ public class UIManager : MonoBehaviour
             });
 
         if (restartButton != null)
-            restartButton.onClick.AddListener(() => Events.RaiseRestartClicked());
+            restartButton.onClick.AddListener(() => {
+                Debug.Log("[UIManager] Restart clicked");
+                Events.RaiseRestartClicked();
+            });
 
         if (leaveButton != null)
-            leaveButton.onClick.AddListener(() => Events.RaiseLeaveClicked());
+            leaveButton.onClick.AddListener(() => {
+                Debug.Log("[UIManager] Leave clicked");
+                Events.RaiseLeaveClicked();
+            });
 
         SetupHoldButton(moveUp, Vector2.up);
         SetupHoldButton(moveDown, Vector2.down);
@@ -135,25 +139,24 @@ public class UIManager : MonoBehaviour
         Debug.Log($"[UIManager] Status: {t}");
     }
 
-    // ===== FIX V2: Improved ShowMenu with explicit logging =====
     private void ShowMenu(bool show)
     {
         Debug.Log($"[UIManager] ShowMenu({show}) called");
 
         if (show)
         {
-            // ===== SHOW MENU =====
+            // Show menu panels
             if (joinPanel != null) joinPanel.SetActive(true);
             if (scorePanel != null) scorePanel.SetActive(false);
             if (controllerPanel != null) controllerPanel.SetActive(false);
             if (gameOverPanel != null) gameOverPanel.SetActive(false);
             menuVisible = true;
             gameplayVisible = false;
-            Debug.Log("[UIManager] Menu panels shown, gameplay panels hidden");
+            Debug.Log("[UIManager] Menu panels shown, gameplay hidden");
         }
         else
         {
-            // ===== SHOW GAMEPLAY =====
+            // Show gameplay panels
             if (joinPanel != null) joinPanel.SetActive(false);
             if (scorePanel != null) scorePanel.SetActive(true);
             if (controllerPanel != null) controllerPanel.SetActive(true);
@@ -180,10 +183,9 @@ public class UIManager : MonoBehaviour
     {
         if (scoreText != null)
             scoreText.text = $"{playerName}: {kills}";
-        Debug.Log($"[UIManager] Score updated: {playerName} - {kills} kills");
+        Debug.Log($"[UIManager] Score updated: {playerName} - {kills}");
     }
 
-    // ===== Helper class for look area dragging =====
     private class LookAreaHandler : MonoBehaviour, IDragHandler, IPointerDownHandler, IPointerUpHandler
     {
         public System.Action<Vector2> OnDragDelta;
