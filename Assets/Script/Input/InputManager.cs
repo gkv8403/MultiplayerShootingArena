@@ -99,7 +99,7 @@ public class InputManager : MonoBehaviour
         float mouseY = Input.GetAxis("Mouse Y");
 
         // For PC, apply mouse delta directly with multiplier
-        CurrentLookDelta = new Vector2(mouseX * 15f, mouseY * 15f);
+        CurrentLookDelta = new Vector2(mouseX * 30f, mouseY * 30f);
 
         // Simple fire - hold mouse button to keep firing
         CurrentFire = Input.GetMouseButton(0);

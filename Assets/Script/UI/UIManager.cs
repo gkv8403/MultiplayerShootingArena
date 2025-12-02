@@ -53,11 +53,12 @@ public class UIManager : MonoBehaviour
         SetupMenuButtons();
         SetupMovementButtons();
         SetupFireButton();
-        SetupFullscreenLookArea(); // NEW: Create fullscreen look area
+        SetupFullscreenLookArea();
 
         Events.OnSetStatusText += SetStatusText;
         Events.OnShowMenu += ShowMenu;
         Events.OnShowGameOver += ShowGameOver;
+        Events.OnShowGameOverWithWinner += ShowGameOverWithWinner;
         Events.OnUpdateScore += UpdateScoreText;
     }
 
@@ -66,8 +67,10 @@ public class UIManager : MonoBehaviour
         Events.OnSetStatusText -= SetStatusText;
         Events.OnShowMenu -= ShowMenu;
         Events.OnShowGameOver -= ShowGameOver;
+        Events.OnShowGameOverWithWinner -= ShowGameOverWithWinner;
         Events.OnUpdateScore -= UpdateScoreText;
     }
+
 
     /// <summary>
     /// Creates a fullscreen invisible panel for touch drag input that sits above all UI
@@ -274,7 +277,18 @@ public class UIManager : MonoBehaviour
 
         UpdateScoreDisplay();
     }
+    /// <summary>
+    /// Show game over with winner information from network
+    /// </summary>
+    private void ShowGameOverWithWinner(string winner, int kills)
+    {
+        // Store winner info
+        lastWinner = winner;
+        lastWinnerKills = kills;
 
+        // Call regular ShowGameOver to display it
+        ShowGameOver();
+    }
     private void ShowGameOver()
     {
         SetActive(gameOverPanel, true);

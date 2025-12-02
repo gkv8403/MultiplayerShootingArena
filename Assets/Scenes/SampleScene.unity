@@ -463,8 +463,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   useKeyboardMouse: 1
-  touchSensitivityX: 5
-  touchSensitivityY: 5
+  touchSensitivityX: 1
+  touchSensitivityY: 1
   touchSmoothing: 0.1
 --- !u!1 &286890023
 GameObject:
@@ -2449,7 +2449,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 68e45cb346d268242a93d5ef0acc22dd, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  killsToWin: 10
+  killsToWin: 5
 --- !u!1 &787160757
 GameObject:
   m_ObjectHideFlags: 0
@@ -5301,7 +5301,7 @@ MonoBehaviour:
   restartButton: {fileID: 1829849455}
   leaveButton: {fileID: 941577520}
   gameOverText: {fileID: 1009135826}
-  winnerInfoText: {fileID: 0}
+  winnerInfoText: {fileID: 433421215}
   scoreText: {fileID: 528146668}
   moveUp: {fileID: 286890027}
   moveDown: {fileID: 979645737}

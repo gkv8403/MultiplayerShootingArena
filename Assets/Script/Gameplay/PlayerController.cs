@@ -538,7 +538,48 @@ namespace Scripts.Gameplay
             if (respawnCountdownText != null)
                 respawnCountdownText.gameObject.SetActive(false);
         }
+
+        /// <summary>
+        /// RPC to sync match state to all clients (running, winner info)
+        /// </summary>
+        [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
+        public void RPC_SyncMatchState(bool isRunning, NetworkString<_16> winner, int kills)
+        {
+            Debug.Log($"[PlayerController] RPC_SyncMatchState received - Running: {isRunning}");
+
+            var gameManager = FindObjectOfType<GameManager>();
+            if (gameManager != null)
+            {
+                gameManager.SyncMatchStateFromNetwork(isRunning, winner.ToString(), kills);
+            }
+
+            // Show/hide menu based on match state
+            Events.RaiseShowMenu(!isRunning);
+        }
+
+        /// <summary>
+        /// RPC to broadcast game over to all clients with winner information
+        /// </summary>
+        [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
+        public void RPC_BroadcastGameOver(NetworkString<_16> winner, int kills)
+        {
+            string winnerName = winner.ToString();
+
+            Debug.Log($"[PlayerController] RPC_BroadcastGameOver received - Winner: {winnerName}, Kills: {kills}");
+
+            // Update status text
+            string winText = string.IsNullOrEmpty(winnerName)
+                ? "Match ended!"
+                : $"{winnerName} wins with {kills} kills!";
+
+            Events.RaiseSetStatusText(winText);
+
+            // Trigger game over with winner info
+            Events.RaiseShowGameOverWithWinner(winnerName, kills);
+        }
+
         #endregion
+
 
         #region Respawn
         /// <summary>
