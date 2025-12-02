@@ -15,7 +15,6 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
     public NetworkPrefabRef playerPrefab;
     public Transform[] spawnPoints;
 
-    // FIX 1: Use timestamp-based session names for unique rooms
     private string currentSessionName = "";
     private bool isConnecting = false;
     private int connectionAttempts = 0;
@@ -44,7 +43,6 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
             runner.RemoveCallbacks(this);
     }
 
-    // FIX 2: Host always creates NEW session with unique name
     private void OnHostClicked()
     {
         if (isConnecting) return;
@@ -56,7 +54,6 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
         StartRunner(GameMode.Host, currentSessionName);
     }
 
-    // FIX 3: Quick Join searches for rooms, creates new if none found
     private void OnQuickJoinClicked()
     {
         if (isConnecting) return;
@@ -75,13 +72,13 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
             return;
         }
 
-        // FIX 4: Cleanup existing runner before starting new one
+        // Cleanup existing runner before starting new one
         if (runner != null)
         {
             Debug.Log("[NetworkManager] Cleaning up existing runner...");
             await runner.Shutdown();
             CleanupRunner();
-            await Task.Delay(500); // Wait for cleanup
+            await Task.Delay(500);
         }
 
         isConnecting = true;
@@ -107,11 +104,10 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
 
                 var sceneManager = runner.gameObject.AddComponent<NetworkSceneManagerDefault>();
 
-                // FIX 5: Proper StartGameArgs configuration
                 var args = new StartGameArgs()
                 {
                     GameMode = mode,
-                    SessionName = string.IsNullOrEmpty(sessionName) ? null : sessionName, // null = search any
+                    SessionName = string.IsNullOrEmpty(sessionName) ? null : sessionName,
                     PlayerCount = 16,
                     SceneManager = sceneManager,
                     SessionProperties = new Dictionary<string, SessionProperty>
@@ -120,7 +116,6 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
                         { "Version", "1.0" },
                         { "Map", "Arena_Default" }
                     },
-                    // FIX 6: Add matchmaking options
                     CustomLobbyName = "DefaultLobby"
                 };
 
@@ -139,20 +134,20 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
                     Events.RaiseSetStatusText($"Connected as {roleText}");
                     isConnecting = false;
                     Events.RaiseShowMenu(false);
-                    return; // Success!
+                    return;
                 }
                 else
                 {
                     Debug.LogWarning($"[NetworkManager] Start failed: {startResult.ShutdownReason}");
 
-                    // FIX 7: If AutoHostOrClient failed to find room, become host
+                    // If AutoHostOrClient failed to find room, become host
                     if (mode == GameMode.AutoHostOrClient && connectionAttempts >= 2)
                     {
                         Debug.Log("[NetworkManager] No rooms found, becoming host...");
                         CleanupRunner();
                         currentSessionName = $"ARENA_{System.DateTime.UtcNow.Ticks}";
                         mode = GameMode.Host;
-                        connectionAttempts = 0; // Reset for host attempt
+                        connectionAttempts = 0;
                         continue;
                     }
 
@@ -194,9 +189,14 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
 
         if (runner != null && runner.IsServer)
         {
-            Events.RaiseMatchStart();
-
+            // ✅ Use RPC to start match on all clients
             var players = FindObjectsOfType<PlayerController>();
+            if (players.Length > 0 && players[0].Object != null && players[0].Object.HasStateAuthority)
+            {
+                players[0].RPC_StartMatchOnAllClients();
+            }
+
+            // Reset all players on server
             foreach (var p in players)
             {
                 if (p.Object != null && p.Object.HasStateAuthority)
@@ -204,13 +204,11 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
                     p.Kills = 0;
                     p.Deaths = 0;
                     p.Health = p.maxHealth;
-                    // Broadcast initial score
                     p.RPC_UpdateScoreOnAllClients(p.PlayerName, 0);
                 }
             }
 
             Events.RaiseSetStatusText("Match restarted!");
-            Events.RaiseShowMenu(false);
         }
         else
         {
@@ -243,7 +241,7 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
             moveInput = im.CurrentMoveInput,
             lookInput = im.CurrentLookDelta,
             fire = im.CurrentFire,
-            verticalMove = im.CurrentVerticalMove // NEW: Vertical movement
+            verticalMove = im.CurrentVerticalMove
         };
 
         input.Set(data);
@@ -274,22 +272,38 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
             var playerObj = runnerRef.Spawn(playerPrefab, pos, rot, player);
             Debug.Log($"[NetworkManager] ✓ Spawned player {player.PlayerId} at {pos}");
 
-            // Start match when 2+ players
+            // ✅ Start match when 2+ players join
             if (runnerRef.ActivePlayers.Count() >= 2)
             {
-                Debug.Log("[NetworkManager] 2+ players - starting match");
+                Debug.Log("[NetworkManager] 2+ players - starting match via RPC");
 
-                // Small delay to ensure all clients are ready
-                Invoke(nameof(DelayedMatchStart), 0.5f);
+                // Wait a frame for all spawns to complete
+                Invoke(nameof(StartMatchForAllClients), 0.5f);
             }
         }
 
         Events.RaiseSetStatusText($"Players: {runnerRef.ActivePlayers.Count()}");
     }
 
-    private void DelayedMatchStart()
+    // ✅ NEW: Start match using RPC
+    private void StartMatchForAllClients()
     {
-        Events.RaiseMatchStart();
+        if (runner == null || !runner.IsServer) return;
+
+        var players = FindObjectsOfType<PlayerController>();
+        if (players.Length > 0)
+        {
+            // Find any player with state authority to call RPC
+            foreach (var p in players)
+            {
+                if (p.Object != null && p.Object.HasStateAuthority)
+                {
+                    Debug.Log($"[NetworkManager] 🎮 Starting match via {p.PlayerName}");
+                    p.RPC_StartMatchOnAllClients();
+                    break;
+                }
+            }
+        }
     }
 
     public void OnPlayerLeft(NetworkRunner runnerRef, PlayerRef player)

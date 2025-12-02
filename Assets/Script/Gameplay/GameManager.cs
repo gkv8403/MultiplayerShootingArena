@@ -11,10 +11,7 @@ public class GameManager : MonoBehaviour
     private int winnerKills = 0;
     private NetworkRunner runner;
 
-    // Track scores locally for debugging
     private Dictionary<string, int> playerKills = new Dictionary<string, int>();
-
-    // ✅ FIX: Prevent duplicate win triggers
     private bool matchEnding = false;
 
     private void Awake()
@@ -59,27 +56,45 @@ public class GameManager : MonoBehaviour
 
     private void StartMatch()
     {
+        Debug.Log($"[GameManager] ========================================");
+        Debug.Log($"[GameManager] START MATCH CALLED");
+        Debug.Log($"[GameManager] Is Server: {GetIsServer()}");
+        Debug.Log($"[GameManager] ========================================");
+
+        // CLIENT: Just update state
         if (!GetIsServer())
         {
-            Debug.Log("[GameManager] Not server, ignoring start request");
+            if (matchRunning)
+            {
+                Debug.Log("[GameManager] ⚠️ CLIENT: Match already running");
+                return;
+            }
+
+            matchRunning = true;
+            matchEnding = false;
+            Debug.Log($"[GameManager] ✅ CLIENT: Match running (tracking {playerKills.Count} scores)");
+            Events.RaiseShowMenu(false);
             return;
         }
 
+        // SERVER: Full initialization
         if (matchRunning)
         {
-            Debug.Log("[GameManager] Match already running");
+            Debug.Log("[GameManager] ⚠️ SERVER: Match already running");
             return;
         }
 
         matchRunning = true;
-        matchEnding = false; // ✅ Reset ending flag
+        matchEnding = false;
         winnerName = "";
         winnerKills = 0;
         playerKills.Clear();
 
-        Debug.Log("[GameManager] ========== MATCH STARTED ==========");
+        Debug.Log("[GameManager] ✅ SERVER: MATCH IS NOW RUNNING!");
 
         var players = FindObjectsOfType<Scripts.Gameplay.PlayerController>();
+        Debug.Log($"[GameManager] SERVER: Found {players.Length} players");
+
         foreach (var p in players)
         {
             if (p.Object != null && p.Object.HasStateAuthority)
@@ -92,37 +107,26 @@ public class GameManager : MonoBehaviour
                 string pName = p.PlayerName.ToString();
                 playerKills[pName] = 0;
 
+                Debug.Log($"[GameManager] SERVER: ✓ Reset {pName} (Player{p.Object.InputAuthority.PlayerId})");
+                Debug.Log($"[GameManager] SERVER:   - Combat: {p.CombatEnabled}");
+                Debug.Log($"[GameManager] SERVER:   - Health: {p.Health}");
+
                 // Broadcast initial score
                 p.RPC_UpdateScoreOnAllClients(p.PlayerName, 0);
-
-                Debug.Log($"[GameManager] ✓ Reset player {pName} - Combat: ENABLED");
             }
         }
 
         Events.RaiseShowMenu(false);
-        Debug.Log($"[GameManager] ✓ Combat enabled for {players.Length} players");
+        Debug.Log($"[GameManager] ========================================");
+        Debug.Log($"[GameManager] MATCH STARTED SUCCESSFULLY");
+        Debug.Log($"[GameManager] ========================================");
     }
 
     private void EndMatch(string winner, int kills)
     {
-        if (!GetIsServer())
-        {
-            Debug.Log("[GameManager] Not server, ignoring end request");
-            return;
-        }
-
-        if (!matchRunning)
-        {
-            Debug.Log("[GameManager] Match not running");
-            return;
-        }
-
-        // ✅ FIX: Prevent duplicate end calls
-        if (matchEnding)
-        {
-            Debug.Log("[GameManager] ⚠️ Match already ending, ignoring duplicate");
-            return;
-        }
+        if (!GetIsServer()) return;
+        if (!matchRunning) return;
+        if (matchEnding) return;
 
         matchEnding = true;
         matchRunning = false;
@@ -135,10 +139,9 @@ public class GameManager : MonoBehaviour
         var players = FindObjectsOfType<Scripts.Gameplay.PlayerController>();
         foreach (var p in players)
         {
-            if (p.Object != null)
+            if (p.Object != null && p.Object.HasStateAuthority)
             {
                 p.EnableCombat(false);
-                Debug.Log($"[GameManager] 🚫 Disabled combat for {p.PlayerName}");
             }
         }
 
@@ -150,88 +153,114 @@ public class GameManager : MonoBehaviour
         Events.RaiseShowGameOver();
     }
 
-    // ✅ FIX: Enhanced score tracking with better logging
     private void OnScoreUpdate(string playerName, int kills)
     {
-        // Update local tracking
+        // Always update local dictionary
         playerKills[playerName] = kills;
 
-        Debug.Log($"[GameManager] ==================");
-        Debug.Log($"[GameManager] 📊 SCORE UPDATE");
+        Debug.Log($"[GameManager] ==========================================");
+        Debug.Log($"[GameManager] 📊 OnScoreUpdate EVENT");
         Debug.Log($"[GameManager] Player: {playerName}");
-        Debug.Log($"[GameManager] Kills: {kills}/{killsToWin}");
+        Debug.Log($"[GameManager] Kills: {kills}");
+        Debug.Log($"[GameManager] Is Server: {GetIsServer()}");
         Debug.Log($"[GameManager] Match Running: {matchRunning}");
         Debug.Log($"[GameManager] Match Ending: {matchEnding}");
-        Debug.Log($"[GameManager] Is Server: {GetIsServer()}");
-        Debug.Log($"[GameManager] ------------------");
+        Debug.Log($"[GameManager] Total Tracked: {playerKills.Count}");
 
-        // Show all current scores
+        // Show all scores
+        Debug.Log($"[GameManager] --- Current Scores ---");
         foreach (var kvp in playerKills.OrderByDescending(x => x.Value))
         {
-            string marker = kvp.Key == playerName ? " ← NEW" : "";
-            Debug.Log($"[GameManager]   {kvp.Key}: {kvp.Value} kills{marker}");
+            Debug.Log($"[GameManager]   {kvp.Key}: {kvp.Value}");
         }
-        Debug.Log($"[GameManager] ==================");
+        Debug.Log($"[GameManager] ==========================================");
 
+        // Only server checks win condition
         if (!GetIsServer())
         {
-            Debug.Log("[GameManager] ⚠️ Not server, score update logged only");
+            Debug.Log("[GameManager] CLIENT - Score tracked for UI only");
             return;
         }
 
         if (!matchRunning)
         {
-            Debug.Log("[GameManager] ⚠️ Match not running, score ignored");
+            Debug.Log("[GameManager] ⚠️ SERVER: Match not running - ignoring for win check");
             return;
         }
 
         if (matchEnding)
         {
-            Debug.Log("[GameManager] ⚠️ Match ending, score ignored");
+            Debug.Log("[GameManager] ⚠️ SERVER: Match ending - ignoring");
             return;
         }
 
-        // ✅ FIX: Check win condition
+        // Check win condition
         if (kills >= killsToWin)
         {
-            Debug.Log($"[GameManager] 🎉🏆🎉 {playerName} REACHED {killsToWin} KILLS!");
-            Debug.Log($"[GameManager] 🎉🏆🎉 MATCH OVER - WINNER: {playerName}!");
+            Debug.Log($"[GameManager] ========================================");
+            Debug.Log($"[GameManager] 🏆🎉 VICTORY!");
+            Debug.Log($"[GameManager] Winner: {playerName}");
+            Debug.Log($"[GameManager] Kills: {kills}/{killsToWin}");
+            Debug.Log($"[GameManager] ========================================");
             EndMatch(playerName, kills);
         }
         else
         {
-            int remaining = killsToWin - kills;
-            Debug.Log($"[GameManager] 💪 {playerName} needs {remaining} more kill{(remaining > 1 ? "s" : "")} to win");
+            Debug.Log($"[GameManager] 💪 SERVER: {playerName} needs {killsToWin - kills} more kills to win");
         }
     }
 
     public bool IsMatchRunning() => matchRunning && !matchEnding;
 
-    // ✅ FIX: Enhanced debug UI
     private void OnGUI()
     {
-        if (!GetIsServer() || !Debug.isDebugBuild) return;
+        if (!Debug.isDebugBuild) return;
 
-        GUI.color = matchRunning ? Color.green : Color.yellow;
-        GUILayout.BeginArea(new Rect(10, 10, 300, 200));
+        string role = GetIsServer() ? "SERVER" : "CLIENT";
+        GUI.color = matchRunning ? Color.green : Color.red;
 
-        GUILayout.Label("=== GAME MANAGER (SERVER) ===");
+        float xPos = GetIsServer() ? 10 : Screen.width - 310;
+        GUILayout.BeginArea(new Rect(xPos, 10, 300, 350));
+
+        GUILayout.Label($"=== GAME MANAGER ({role}) ===");
         GUILayout.Label($"Match Running: {matchRunning}");
         GUILayout.Label($"Match Ending: {matchEnding}");
         GUILayout.Label($"Kills to Win: {killsToWin}");
 
-        GUILayout.Label("--- SCORES ---");
+        GUILayout.Space(10);
+        GUILayout.Label("--- SCORES TRACKED ---");
 
         if (playerKills.Count == 0)
         {
-            GUILayout.Label("No players yet");
+            GUILayout.Label("No scores yet");
         }
         else
         {
             foreach (var kvp in playerKills.OrderByDescending(x => x.Value))
             {
                 string winIndicator = kvp.Value >= killsToWin ? " 🏆" : "";
-                GUILayout.Label($"{kvp.Key}: {kvp.Value}/{killsToWin}{winIndicator}");
+                string progress = $"{kvp.Value}/{killsToWin}";
+                GUI.color = kvp.Value >= killsToWin ? Color.yellow : Color.white;
+                GUILayout.Label($"{kvp.Key}: {progress}{winIndicator}");
+                GUI.color = matchRunning ? Color.green : Color.red;
+            }
+        }
+
+        if (GetIsServer())
+        {
+            GUILayout.Space(10);
+            GUILayout.Label("--- SERVER PLAYER STATE ---");
+            var allPlayers = FindObjectsOfType<Scripts.Gameplay.PlayerController>();
+            GUILayout.Label($"Total Players: {allPlayers.Length}");
+
+            foreach (var p in allPlayers)
+            {
+                if (p.Object != null && p.Object.HasStateAuthority)
+                {
+                    string combatStatus = p.CombatEnabled ? "✅" : "❌";
+                    GUILayout.Label($"{p.PlayerName}: {combatStatus}");
+                    GUILayout.Label($"  K:{p.Kills} D:{p.Deaths} HP:{p.Health}");
+                }
             }
         }
 

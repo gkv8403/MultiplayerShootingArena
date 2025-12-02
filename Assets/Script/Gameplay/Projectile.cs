@@ -16,18 +16,39 @@ public class Projectile : NetworkBehaviour
     public bool IsActive => IsActiveNetworked;
 
     private TrailRenderer trail;
-    private Renderer projectileRenderer;
+    private MeshRenderer meshRenderer;
     private bool isInitialized = false;
 
-    // ✅ Client-side prediction variables
-    private Vector3 clientPosition;
-    private Vector3 clientVelocity;
-    private bool clientActive = false;
+    // ✅ Track state changes manually
+    private bool lastActiveState = false;
 
     private void Awake()
     {
-        trail = GetComponent<TrailRenderer>();
-        projectileRenderer = GetComponent<Renderer>();
+        meshRenderer = GetComponentInChildren<MeshRenderer>();
+        trail = GetComponentInChildren<TrailRenderer>();
+
+        if (meshRenderer == null)
+        {
+            Debug.LogError("[Projectile] ⚠️ NO MESHRENDERER FOUND! Check your prefab!");
+
+            // Try to find it more aggressively
+            var allRenderers = GetComponentsInChildren<Renderer>(true);
+            foreach (var r in allRenderers)
+            {
+                if (r is MeshRenderer)
+                {
+                    meshRenderer = (MeshRenderer)r;
+                    Debug.Log($"[Projectile] ✓ Found MeshRenderer: {meshRenderer.gameObject.name}");
+                    break;
+                }
+            }
+        }
+        else
+        {
+            Debug.Log($"[Projectile] ✓ MeshRenderer found: {meshRenderer.gameObject.name}");
+        }
+
+        // Start hidden
         SetVisibility(false);
     }
 
@@ -36,13 +57,15 @@ public class Projectile : NetworkBehaviour
         base.Spawned();
         isInitialized = true;
 
-        Debug.Log($"[Projectile] Spawned - Authority: {Object.HasStateAuthority}");
+        Debug.Log($"[Projectile] Spawned - Authority: {Object.HasStateAuthority}, ID: {Object.Id}");
 
         if (Object.HasStateAuthority)
         {
-            // Server initializes as inactive
             ForceDeactivateNetworked();
         }
+
+        lastActiveState = IsActiveNetworked;
+        SetVisibility(IsActiveNetworked);
     }
 
     public void ForceDeactivateNetworked()
@@ -63,35 +86,48 @@ public class Projectile : NetworkBehaviour
     {
         if (!Object.HasStateAuthority) return;
 
-        Debug.Log($"[Projectile] 🔫 SERVER: Firing from {position} dir {direction} for {owner}");
+        Debug.Log($"[Projectile] 🔫 SERVER: Firing from {position} for Player{owner.PlayerId}");
 
         Owner = owner;
-        IsActiveNetworked = true;
-        LifeTimer = TickTimer.CreateFromSeconds(Runner, lifeSeconds);
-
-        // ✅ Set position and velocity on server
         NetworkPosition = position;
         NetworkVelocity = direction.normalized * speed;
+        LifeTimer = TickTimer.CreateFromSeconds(Runner, lifeSeconds);
 
         transform.position = position;
+
+        // Set active and show
+        IsActiveNetworked = true;
         SetVisibility(true);
 
-        Debug.Log($"[Projectile] ✅ SERVER: Set velocity {NetworkVelocity}, pos {NetworkPosition}");
+        Debug.Log($"[Projectile] ✅ SERVER: Projectile activated for Player{owner.PlayerId}");
     }
 
-    // ✅ This is called EVERY network tick (better than RPC for continuous sync)
     public override void FixedUpdateNetwork()
     {
         if (!isInitialized) return;
 
+        // ✅ CRITICAL: Check for state changes FIRST on all machines
+        if (lastActiveState != IsActiveNetworked)
+        {
+            string role = Object.HasStateAuthority ? "SERVER" : "CLIENT";
+            Debug.Log($"[Projectile] 🔄 {role}: State changed {lastActiveState} → {IsActiveNetworked}");
+
+            SetVisibility(IsActiveNetworked);
+            lastActiveState = IsActiveNetworked;
+
+            // Force update on client
+            if (!Object.HasStateAuthority && IsActiveNetworked)
+            {
+                Debug.Log($"[Projectile] 🔥 CLIENT: Projectile activated at {NetworkPosition}");
+            }
+        }
+
         if (Object.HasStateAuthority)
         {
-            // SERVER: Simulate physics and hit detection
             ServerSimulation();
         }
         else
         {
-            // CLIENT: Render based on networked state
             ClientSimulation();
         }
     }
@@ -100,11 +136,8 @@ public class Projectile : NetworkBehaviour
     {
         if (!IsActiveNetworked)
         {
-            SetVisibility(false);
             return;
         }
-
-        SetVisibility(true);
 
         // Check lifetime
         if (LifeTimer.Expired(Runner))
@@ -126,7 +159,7 @@ public class Projectile : NetworkBehaviour
             return;
         }
 
-        // ✅ Hit detection with raycast
+        // Hit detection
         Vector3 direction = NetworkVelocity.normalized;
         float distance = movement.magnitude;
 
@@ -140,11 +173,14 @@ public class Projectile : NetworkBehaviour
                 var pc = hitObj.GetComponent<PlayerController>();
                 if (pc != null && pc.Object != null)
                 {
-                    // Don't hit yourself or dead players
                     if (pc.Object.InputAuthority != Owner && !pc.IsDead)
                     {
-                        Debug.Log($"[Projectile] 🎯 SERVER: Hit player {pc.PlayerName}!");
+                        Debug.Log($"[Projectile] 🎯 SERVER: Hit player {pc.PlayerName} | Attacker: Player{Owner.PlayerId}");
                         pc.ApplyDamageServerSide(damage, Owner);
+                    }
+                    else if (pc.Object.InputAuthority == Owner)
+                    {
+                        Debug.Log($"[Projectile] ⚠️ SERVER: Can't hit self");
                     }
                 }
             }
@@ -153,110 +189,120 @@ public class Projectile : NetworkBehaviour
             return;
         }
 
-        // ✅ Update position every frame for smooth client sync
+        // Update position
         NetworkPosition = nextPosition;
         transform.position = nextPosition;
     }
 
     private void ClientSimulation()
     {
-        // ✅ CLIENT: Always sync from networked state
-
         if (!IsActiveNetworked)
         {
-            SetVisibility(false);
-            clientActive = false;
             return;
         }
 
-        // Show projectile
-        if (!clientActive)
+        // Smooth interpolation
+        transform.position = Vector3.Lerp(transform.position, NetworkPosition, 20f * Runner.DeltaTime);
+    }
+
+    // ✅ CRITICAL FIX: More aggressive visibility control
+    private void SetVisibility(bool visible)
+    {
+        string role = Object != null && Object.HasStateAuthority ? "SERVER" : "CLIENT";
+
+        Debug.Log($"[Projectile] 👁️ {role}: SetVisibility({visible}) called");
+
+        // Method 1: Force specific MeshRenderer
+        if (meshRenderer != null)
         {
-            clientActive = true;
-            clientPosition = NetworkPosition;
-            clientVelocity = NetworkVelocity;
-            transform.position = NetworkPosition;
-            SetVisibility(true);
-
-            if (trail != null)
-                trail.Clear();
-
-            Debug.Log($"[Projectile] 🎯 CLIENT: Activated at {NetworkPosition} vel {NetworkVelocity}");
-        }
-
-        // ✅ Smooth interpolation with prediction
-        if (NetworkVelocity.sqrMagnitude > 0.01f)
-        {
-            // Predict position based on velocity
-            Vector3 predictedPos = transform.position + (NetworkVelocity * Runner.DeltaTime);
-
-            // Blend between prediction and network state (80% network, 20% prediction)
-            Vector3 targetPos = Vector3.Lerp(NetworkPosition, predictedPos, 0.2f);
-            transform.position = Vector3.Lerp(transform.position, targetPos, 30f * Runner.DeltaTime);
+            meshRenderer.enabled = visible;
+            Debug.Log($"[Projectile] 👁️ {role}: MeshRenderer.enabled = {visible} on {meshRenderer.gameObject.name}");
         }
         else
         {
-            // Fallback: just lerp to network position
-            transform.position = Vector3.Lerp(transform.position, NetworkPosition, 20f * Runner.DeltaTime);
+            Debug.LogError($"[Projectile] ❌ {role}: MeshRenderer is NULL!");
         }
-    }
 
-    private void SetVisibility(bool visible)
-    {
-        if (projectileRenderer != null)
-            projectileRenderer.enabled = visible;
+        // Method 2: Force ALL MeshRenderers (redundant but safe)
+        var allMeshRenderers = GetComponentsInChildren<MeshRenderer>(true);
+        Debug.Log($"[Projectile] 👁️ {role}: Found {allMeshRenderers.Length} MeshRenderers");
 
+        foreach (var mr in allMeshRenderers)
+        {
+            if (mr != null)
+            {
+                mr.enabled = visible;
+                Debug.Log($"[Projectile] 👁️ {role}: Set {mr.gameObject.name} MeshRenderer to {visible}");
+            }
+        }
+
+        // Method 3: Force all non-trail renderers
+        var allRenderers = GetComponentsInChildren<Renderer>(true);
+        foreach (var r in allRenderers)
+        {
+            if (r != null && !(r is TrailRenderer))
+            {
+                r.enabled = visible;
+            }
+        }
+
+        // Handle trail
         if (trail != null)
         {
-            if (visible)
+            if (visible && !trail.enabled)
             {
-                if (!trail.enabled)
-                {
-                    trail.Clear();
-                    trail.enabled = true;
-                }
+                trail.Clear();
+                trail.enabled = true;
             }
-            else
+            else if (!visible && trail.enabled)
             {
                 trail.enabled = false;
             }
+        }
+
+        // Final verification
+        if (meshRenderer != null)
+        {
+            Debug.Log($"[Projectile] ✓ {role}: Final MeshRenderer state = {meshRenderer.enabled}");
         }
     }
 
     private void Deactivate()
     {
         if (!Object.HasStateAuthority) return;
-
-        Debug.Log("[Projectile] 🔴 SERVER: Deactivating");
+        Debug.Log($"[Projectile] 🔴 SERVER: Deactivating");
         ForceDeactivateNetworked();
+    }
+
+    // ✅ DIAGNOSTIC: Visual indicator
+    private void OnGUI()
+    {
+        if (!Application.isPlaying || !IsActiveNetworked) return;
+        if (Camera.main == null) return;
+
+        Vector3 screenPos = Camera.main.WorldToScreenPoint(transform.position);
+        if (screenPos.z > 0 && screenPos.x > 0 && screenPos.x < Screen.width && screenPos.y > 0 && screenPos.y < Screen.height)
+        {
+            string role = Object.HasStateAuthority ? "S" : "C";
+            string meshStatus = meshRenderer != null && meshRenderer.enabled ? "✓" : "✗";
+
+            GUI.color = Object.HasStateAuthority ? Color.green : Color.yellow;
+            GUI.Label(new Rect(screenPos.x - 20, Screen.height - screenPos.y - 10, 100, 20),
+                $"{role} {meshStatus}");
+        }
     }
 
     private void OnDrawGizmos()
     {
-        if (Application.isPlaying && IsActiveNetworked)
+        if (!Application.isPlaying || !IsActiveNetworked) return;
+
+        Gizmos.color = Object != null && Object.HasStateAuthority ? Color.green : Color.yellow;
+        Gizmos.DrawWireSphere(transform.position, 0.15f);
+
+        if (NetworkVelocity != Vector3.zero)
         {
-            Gizmos.color = Color.yellow;
-            Gizmos.DrawWireSphere(transform.position, 0.12f);
-
-            if (NetworkVelocity != Vector3.zero)
-            {
-                Gizmos.color = Color.red;
-                Gizmos.DrawRay(transform.position, NetworkVelocity.normalized * 1f);
-            }
-        }
-    }
-
-    // ✅ Debug info
-    private void OnGUI()
-    {
-        if (!Debug.isDebugBuild || !IsActiveNetworked) return;
-
-        Vector3 screenPos = Camera.main.WorldToScreenPoint(transform.position);
-        if (screenPos.z > 0 && screenPos.x > 0 && screenPos.x < Screen.width)
-        {
-            GUI.color = Object.HasStateAuthority ? Color.green : Color.yellow;
-            GUI.Label(new Rect(screenPos.x, Screen.height - screenPos.y, 200, 20),
-                $"Proj: {(Object.HasStateAuthority ? "SERVER" : "CLIENT")}");
+            Gizmos.color = Color.red;
+            Gizmos.DrawRay(transform.position, NetworkVelocity.normalized * 1f);
         }
     }
 }
