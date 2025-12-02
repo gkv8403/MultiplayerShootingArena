@@ -372,6 +372,7 @@ RectTransform:
   - {fileID: 1080352341}
   - {fileID: 630032143}
   - {fileID: 795896727}
+  - {fileID: 833171199}
   m_Father: {fileID: 706278445}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
@@ -462,8 +463,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   useKeyboardMouse: 1
-  touchSensitivityX: 2
-  touchSensitivityY: 2
+  touchSensitivityX: 5
+  touchSensitivityY: 5
   touchSmoothing: 0.1
 --- !u!1 &286890023
 GameObject:
@@ -1051,7 +1052,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 479010855}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 33894d6fd14450947b7faef3676b65b0, type: 3}
   m_Name: 
@@ -2384,7 +2385,6 @@ RectTransform:
   - {fileID: 1388453745}
   - {fileID: 93850840}
   - {fileID: 109636983}
-  - {fileID: 833171199}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
@@ -2650,17 +2650,17 @@ RectTransform:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 833171198}
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
-  m_Father: {fileID: 706278445}
+  m_Father: {fileID: 109636983}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
   m_AnchorMax: {x: 1, y: 1}
-  m_AnchoredPosition: {x: 52.4563, y: -173.3576}
-  m_SizeDelta: {x: -965.0751, y: -346.72}
+  m_AnchoredPosition: {x: 52.4563, y: -192.89879}
+  m_SizeDelta: {x: -965.0751, y: -385.8024}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &833171200
 MonoBehaviour:
