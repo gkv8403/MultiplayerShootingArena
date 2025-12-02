@@ -7,10 +7,19 @@ public class InputManager : MonoBehaviour
     [Header("Input Mode")]
     public bool useKeyboardMouse = true;
 
+    [Header("Mobile Touch Settings")]
+    public float touchSensitivityX = 2f; // Horizontal sensitivity
+    public float touchSensitivityY = 2f; // Vertical sensitivity
+    public float touchSmoothing = 0.1f; // Lower = smoother but more delay
+
     public Vector2 CurrentMoveInput { get; private set; }
     public Vector2 CurrentLookDelta { get; private set; }
     public bool CurrentFire { get; private set; }
-    public float CurrentVerticalMove { get; private set; } // NEW: For Q/E up/down
+    public float CurrentVerticalMove { get; private set; }
+
+    // For smooth mobile look
+    private Vector2 rawTouchDelta = Vector2.zero;
+    private Vector2 smoothedLookDelta = Vector2.zero;
 
     private void Awake()
     {
@@ -40,7 +49,7 @@ public class InputManager : MonoBehaviour
         Events.OnFireDown += OnFireDown;
         Events.OnFireUp += OnFireUp;
         Events.OnVerticalMoveInput += OnVerticalMove;
-        Events.OnVerticalMoveInputStop += OnVerticalMoveStop;
+        Events.OnVerticalMoveInputStop += OnVerticalMoveInputStop;
     }
 
     private void OnDisable()
@@ -51,7 +60,7 @@ public class InputManager : MonoBehaviour
         Events.OnFireDown -= OnFireDown;
         Events.OnFireUp -= OnFireUp;
         Events.OnVerticalMoveInput -= OnVerticalMove;
-        Events.OnVerticalMoveInputStop -= OnVerticalMoveStop;
+        Events.OnVerticalMoveInputStop -= OnVerticalMoveInputStop;
     }
 
     private void Update()
@@ -60,9 +69,10 @@ public class InputManager : MonoBehaviour
         {
             HandleKeyboardInput();
         }
-
-        // Decay look delta smoothly
-        CurrentLookDelta = Vector2.Lerp(CurrentLookDelta, Vector2.zero, 10f * Time.deltaTime);
+        else
+        {
+            HandleMobileInput();
+        }
     }
 
     private void HandleKeyboardInput()
@@ -77,7 +87,7 @@ public class InputManager : MonoBehaviour
 
         CurrentMoveInput = Vector2.ClampMagnitude(moveInput, 1f);
 
-        // NEW: Vertical movement (Q/E for up/down)
+        // Vertical movement (Q/E for up/down)
         float verticalInput = 0f;
         if (Input.GetKey(KeyCode.Q)) verticalInput += 1f;  // Up
         if (Input.GetKey(KeyCode.E)) verticalInput -= 1f;  // Down
@@ -88,16 +98,45 @@ public class InputManager : MonoBehaviour
         float mouseX = Input.GetAxis("Mouse X");
         float mouseY = Input.GetAxis("Mouse Y");
 
-        if (mouseX != 0 || mouseY != 0)
-        {
-            Vector2 look = CurrentLookDelta;
-            look.x += mouseX * 15f;  // Horizontal
-            look.y += mouseY * 15f;  // Vertical
-            CurrentLookDelta = look;
-        }
+        // For PC, apply mouse delta directly with multiplier
+        CurrentLookDelta = new Vector2(mouseX * 15f, mouseY * 15f);
 
         // Simple fire - hold mouse button to keep firing
         CurrentFire = Input.GetMouseButton(0);
+    }
+
+    private void HandleMobileInput()
+    {
+        // Apply sensitivity to raw touch delta
+        Vector2 targetDelta = new Vector2(
+            rawTouchDelta.x * touchSensitivityX,
+            rawTouchDelta.y * touchSensitivityY
+        );
+
+        // Smooth the delta for smoother camera movement
+        smoothedLookDelta = Vector2.Lerp(smoothedLookDelta, targetDelta, touchSmoothing);
+
+        // Set current look delta
+        CurrentLookDelta = smoothedLookDelta;
+
+        // Decay raw touch delta over time when not touching
+        rawTouchDelta = Vector2.Lerp(rawTouchDelta, Vector2.zero, Time.deltaTime * 15f);
+
+        // If raw delta is very small, snap to zero
+        if (rawTouchDelta.magnitude < 0.01f)
+        {
+            rawTouchDelta = Vector2.zero;
+            smoothedLookDelta = Vector2.zero;
+        }
+    }
+
+    // Called by UI touch drag handler
+    private void OnLook(Vector2 delta)
+    {
+        if (useKeyboardMouse) return;
+
+        // Store raw delta from touch - will be processed in HandleMobileInput
+        rawTouchDelta = delta;
     }
 
     // Called by UI buttons (for mobile)
@@ -115,12 +154,6 @@ public class InputManager : MonoBehaviour
         CurrentMoveInput = Vector2.zero;
     }
 
-    private void OnLook(Vector2 delta)
-    {
-        if (useKeyboardMouse) return;
-        CurrentLookDelta += delta * 0.5f;
-    }
-
     private void OnFireDown()
     {
         CurrentFire = true;
@@ -131,14 +164,13 @@ public class InputManager : MonoBehaviour
         CurrentFire = false;
     }
 
-    // NEW: Vertical movement for mobile
     private void OnVerticalMove(float dir)
     {
         if (useKeyboardMouse) return;
         CurrentVerticalMove = dir;
     }
 
-    private void OnVerticalMoveStop()
+    private void OnVerticalMoveInputStop()
     {
         if (useKeyboardMouse) return;
         CurrentVerticalMove = 0f;

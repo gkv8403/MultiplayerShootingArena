@@ -13,7 +13,7 @@ public class CameraController : MonoBehaviour
     public Image crosshair;
 
     [Header("Crosshair Settings")]
-    public Vector2 crosshairOffset = Vector2.zero; // Offset from center if needed
+    public Vector2 crosshairOffset = Vector2.zero; 
     public Color crosshairNormalColor = Color.white;
     public Color crosshairTargetColor = Color.red;
 
@@ -29,7 +29,7 @@ public class CameraController : MonoBehaviour
         if (crosshair != null)
         {
             crosshairRect = crosshair.GetComponent<RectTransform>();
-            // Center crosshair on screen
+         
             if (crosshairRect != null)
             {
                 crosshairRect.anchorMin = new Vector2(0.5f, 0.5f);
@@ -51,7 +51,6 @@ public class CameraController : MonoBehaviour
 
         if (target == null) return;
 
-        // Follow target (third-person camera)
         Vector3 desiredPos = target.position - target.forward * distance + Vector3.up * height;
         transform.position = Vector3.Lerp(transform.position, desiredPos, smoothSpeed * Time.deltaTime);
         transform.LookAt(target.position + Vector3.up * 1.5f);
@@ -84,14 +83,14 @@ public class CameraController : MonoBehaviour
     {
         if (crosshair == null || mainCam == null) return;
 
-        // Raycast from camera center (where bullets will go)
+      
         Ray ray = mainCam.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
 
-        // Check if aiming at a player
+        
         bool hitPlayer = false;
         if (Physics.Raycast(ray, out RaycastHit hit, raycastDistance))
         {
-            // Check if hit a player (but not ourselves)
+          
             var hitPlayerController = hit.collider.GetComponentInParent<Scripts.Gameplay.PlayerController>();
             if (hitPlayerController != null && hitPlayerController != localPlayer)
             {
@@ -99,10 +98,10 @@ public class CameraController : MonoBehaviour
             }
         }
 
-        // Update crosshair color based on target
+       
         crosshair.color = hitPlayer ? crosshairTargetColor : crosshairNormalColor;
 
-        // Optional: Scale crosshair slightly when over target
+       
         if (crosshairRect != null)
         {
             float targetScale = hitPlayer ? 1.2f : 1f;
@@ -114,14 +113,5 @@ public class CameraController : MonoBehaviour
         }
     }
 
-    // Debug helper
-    private void OnDrawGizmos()
-    {
-        if (mainCam == null) return;
-
-        // Draw ray from camera center
-        Ray ray = mainCam.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0f));
-        Gizmos.color = Color.yellow;
-        Gizmos.DrawRay(ray.origin, ray.direction * raycastDistance);
-    }
+   
 }

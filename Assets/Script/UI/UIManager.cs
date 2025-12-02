@@ -5,6 +5,10 @@ using UnityEngine.UI;
 using System.Collections.Generic;
 using System.Linq;
 
+/// <summary>
+/// Manages all UI elements including menu, scoreboard, game over screen, and touch controls.
+/// Handles player score tracking and winner/loser display.
+/// </summary>
 public class UIManager : MonoBehaviour
 {
     [Header("Panels")]
@@ -23,7 +27,6 @@ public class UIManager : MonoBehaviour
     public Button leaveButton;
     public TMP_Text gameOverText;
     public TMP_Text winnerInfoText;
-    public TMP_Text playerCountText;
 
     [Header("Score")]
     public TMP_Text scoreText;
@@ -32,15 +35,17 @@ public class UIManager : MonoBehaviour
     public Button moveUp, moveDown, moveLeft, moveRight;
     public Button moveUpVertical, moveDownVertical;
     public Button fireButton;
-    public RectTransform lookArea;
     public Image crosshair;
 
-    // ✅ FIX: Thread-safe score tracking
+        
     private Dictionary<string, int> playerScores = new Dictionary<string, int>();
     private bool isHost = false;
     private string lastWinner = "";
     private int lastWinnerKills = 0;
-    private float lastScoreUpdateTime = 0f;
+    private string localPlayerName = "";
+
+    private GameObject fullscreenLookArea;
+    public Transform dragarea;
 
     private void Awake()
     {
@@ -48,15 +53,12 @@ public class UIManager : MonoBehaviour
         SetupMenuButtons();
         SetupMovementButtons();
         SetupFireButton();
-        SetupLookArea();
+        SetupFullscreenLookArea(); // NEW: Create fullscreen look area
 
-        // ✅ FIX: Subscribe to events with error handling
         Events.OnSetStatusText += SetStatusText;
         Events.OnShowMenu += ShowMenu;
         Events.OnShowGameOver += ShowGameOver;
         Events.OnUpdateScore += UpdateScoreText;
-
-        Debug.Log("[UIManager] ✓ Initialized and subscribed to events");
     }
 
     private void OnDestroy()
@@ -67,12 +69,54 @@ public class UIManager : MonoBehaviour
         Events.OnUpdateScore -= UpdateScoreText;
     }
 
+    /// <summary>
+    /// Creates a fullscreen invisible panel for touch drag input that sits above all UI
+    /// </summary>
+    private void SetupFullscreenLookArea()
+    {
+        
+       
+
+        // Create fullscreen GameObject
+        fullscreenLookArea = new GameObject("FullscreenLookArea");
+        fullscreenLookArea.transform.SetParent(dragarea, false);
+
+        // Add RectTransform - stretch to fullscreen
+        RectTransform rect = fullscreenLookArea.AddComponent<RectTransform>();
+        rect.anchorMin = Vector2.zero;
+        rect.anchorMax = Vector2.one;
+        rect.sizeDelta = Vector2.zero;
+        rect.anchoredPosition = Vector2.zero;
+
+        // Add Image component (required for raycasting) - make it invisible
+        Image img = fullscreenLookArea.AddComponent<Image>();
+        img.color = new Color(0, 0, 0, 0); // Fully transparent
+        img.raycastTarget = true; // IMPORTANT: Allow touch detection
+     
+        // Add CanvasGroup to control interaction
+        CanvasGroup cg = fullscreenLookArea.AddComponent<CanvasGroup>();
+        cg.alpha = 0; // Invisible
+        cg.interactable = true;
+        cg.blocksRaycasts = true;
+
+        // Add drag handler for look input
+        LookAreaHandler handler = fullscreenLookArea.AddComponent<LookAreaHandler>();
+        handler.OnDragDelta = (delta) => Events.RaiseLookDelta(delta);
+
+        // Set as LAST sibling to ensure it's on top and receives input first
+        rect.SetAsLastSibling();
+
+        Debug.Log("[UIManager] ✓ Fullscreen look area created and set to top");
+
+        // Disable initially (only enable during gameplay on mobile)
+        fullscreenLookArea.SetActive(false);
+    }
+
     private void SetupMenuButtons()
     {
         if (hostButton != null)
         {
             hostButton.onClick.AddListener(() => {
-                Debug.Log("[UIManager] 🖥️ Host clicked");
                 SetButtonsInteractable(false);
                 isHost = true;
                 Events.RaiseHostClicked();
@@ -82,7 +126,6 @@ public class UIManager : MonoBehaviour
         if (quickJoinButton != null)
         {
             quickJoinButton.onClick.AddListener(() => {
-                Debug.Log("[UIManager] 🔌 QuickJoin clicked");
                 SetButtonsInteractable(false);
                 isHost = false;
                 Events.RaiseQuickJoinClicked();
@@ -92,7 +135,6 @@ public class UIManager : MonoBehaviour
         if (restartButton != null)
         {
             restartButton.onClick.AddListener(() => {
-                Debug.Log("[UIManager] 🔄 Restart clicked");
                 Events.RaiseRestartClicked();
             });
         }
@@ -100,7 +142,6 @@ public class UIManager : MonoBehaviour
         if (leaveButton != null)
         {
             leaveButton.onClick.AddListener(() => {
-                Debug.Log("[UIManager] 🚪 Leave clicked");
                 Events.RaiseLeaveClicked();
             });
         }
@@ -164,14 +205,6 @@ public class UIManager : MonoBehaviour
         trig.triggers.Add(pu);
     }
 
-    private void SetupLookArea()
-    {
-        if (lookArea == null) return;
-
-        var dragHandler = lookArea.gameObject.AddComponent<LookAreaHandler>();
-        dragHandler.OnDragDelta = (delta) => Events.RaiseLookDelta(delta);
-    }
-
     private void SetStatusText(string t)
     {
         if (joinStatusText != null)
@@ -180,8 +213,6 @@ public class UIManager : MonoBehaviour
 
     private void ShowMenu(bool show)
     {
-        Debug.Log($"[UIManager] 📺 ShowMenu({show})");
-
         if (show)
         {
             ShowMenuState();
@@ -199,13 +230,15 @@ public class UIManager : MonoBehaviour
         SetActive(controllerPanel, false);
         SetActive(gameOverPanel, false);
 
+        // Disable fullscreen look area in menu
+        if (fullscreenLookArea != null)
+            fullscreenLookArea.SetActive(false);
+
         SetButtonsInteractable(true);
         playerScores.Clear();
         lastWinner = "";
         lastWinnerKills = 0;
         UpdateScoreDisplay();
-
-        Debug.Log("[UIManager] ✓ Menu state active");
     }
 
     private void ShowGameplayState()
@@ -217,28 +250,77 @@ public class UIManager : MonoBehaviour
         bool isMobile = InputManager.Instance != null && !InputManager.Instance.useKeyboardMouse;
         SetActive(controllerPanel, isMobile);
 
-        UpdateScoreDisplay();
+        // Enable fullscreen look area ONLY on mobile during gameplay
+        if (fullscreenLookArea != null)
+        {
+            fullscreenLookArea.SetActive(isMobile);
 
-        Debug.Log($"[UIManager] ✓ Gameplay state (Mobile Controls: {isMobile})");
+            if (isMobile)
+            {
+                // Ensure it's on top every time we show it
+                fullscreenLookArea.transform.SetAsLastSibling();
+                Debug.Log("[UIManager] Fullscreen look area enabled for mobile gameplay");
+            }
+        }
+
+        // Get local player name
+        var localPlayer = FindObjectsOfType<Scripts.Gameplay.PlayerController>()
+            .FirstOrDefault(p => p.Object != null && p.Object.HasInputAuthority);
+
+        if (localPlayer != null)
+        {
+            localPlayerName = localPlayer.PlayerName.ToString();
+        }
+
+        UpdateScoreDisplay();
     }
 
     private void ShowGameOver()
     {
-        Debug.Log("[UIManager] 🏁 ShowGameOver called");
-
         SetActive(gameOverPanel, true);
-        SetActive(scorePanel, true);
+        SetActive(scorePanel, false);
         SetActive(controllerPanel, false);
         SetActive(joinPanel, false);
 
-        // Show winner information
+        // Disable fullscreen look area in game over
+        if (fullscreenLookArea != null)
+            fullscreenLookArea.SetActive(false);
+
+        // Determine if local player won
+        bool didLocalPlayerWin = !string.IsNullOrEmpty(lastWinner) && lastWinner == localPlayerName;
+
+        // Set main game over text
+        if (gameOverText != null)
+        {
+            if (didLocalPlayerWin)
+            {
+                gameOverText.text = "WINNER!";
+                gameOverText.color = Color.green;
+            }
+            else
+            {
+                gameOverText.text = "GAME OVER";
+                gameOverText.color = Color.red;
+            }
+        }
+
+        // Show winner info
         if (winnerInfoText != null)
         {
             if (!string.IsNullOrEmpty(lastWinner) && lastWinnerKills > 0)
             {
                 winnerInfoText.gameObject.SetActive(true);
-                winnerInfoText.text = $"🏆 {lastWinner}\n{lastWinnerKills} Kills";
-                Debug.Log($"[UIManager] 🏆 Displaying winner: {lastWinner} ({lastWinnerKills} kills)");
+
+                if (didLocalPlayerWin)
+                {
+                    winnerInfoText.text = $"You won with {lastWinnerKills} kills!";
+                    winnerInfoText.color = Color.yellow;
+                }
+                else
+                {
+                    winnerInfoText.text = $"Winner: {lastWinner}\n{lastWinnerKills} kills";
+                    winnerInfoText.color = Color.white;
+                }
             }
             else
             {
@@ -246,88 +328,35 @@ public class UIManager : MonoBehaviour
             }
         }
 
-        // Different UI for host vs client
-        if (isHost)
+        // Setup buttons
+        if (restartButton != null)
         {
-            if (gameOverText != null)
-                gameOverText.text = "Match Over!\n(You are Host)";
-
-            if (restartButton != null)
-                restartButton.gameObject.SetActive(true);
-
-            if (playerCountText != null)
-            {
-                int playerCount = FindObjectsOfType<Scripts.Gameplay.PlayerController>().Length;
-                playerCountText.gameObject.SetActive(true);
-                playerCountText.text = $"Players: {playerCount}";
-            }
-        }
-        else
-        {
-            if (gameOverText != null)
-                gameOverText.text = "Match Over!";
-
-            if (restartButton != null)
-            {
-                restartButton.gameObject.SetActive(true);
-                var buttonText = restartButton.GetComponentInChildren<TMP_Text>();
-                if (buttonText != null)
-                    buttonText.text = "Request Restart";
-            }
-
-            if (playerCountText != null)
-                playerCountText.gameObject.SetActive(false);
+            restartButton.gameObject.SetActive(true);
         }
 
-        Debug.Log("[UIManager] ✓ Game over state displayed");
+        if (leaveButton != null)
+        {
+            leaveButton.gameObject.SetActive(true);
+        }
     }
 
-    // ✅ FIX: Enhanced score update with proper tracking
     private void UpdateScoreText(string playerName, int kills)
     {
-        Debug.Log($"[UIManager] ==================");
-        Debug.Log($"[UIManager] 📊 UpdateScoreText EVENT");
-        Debug.Log($"[UIManager] Player: {playerName}");
-        Debug.Log($"[UIManager] Kills: {kills}");
-        Debug.Log($"[UIManager] Time: {Time.time:F2}");
-
-        // ✅ FIX: Update player's score
-        if (!playerScores.ContainsKey(playerName))
-        {
-            Debug.Log($"[UIManager] ➕ Adding new player: {playerName}");
-        }
-        else
-        {
-            Debug.Log($"[UIManager] 🔄 Updating {playerName}: {playerScores[playerName]} → {kills}");
-        }
-
         playerScores[playerName] = kills;
 
-        // Track winner (highest score)
+        // Track winner
         if (kills > lastWinnerKills)
         {
             lastWinner = playerName;
             lastWinnerKills = kills;
-            Debug.Log($"[UIManager] 👑 New leader: {lastWinner} with {lastWinnerKills} kills");
         }
 
-        // Update display
-        lastScoreUpdateTime = Time.time;
         UpdateScoreDisplay();
-
-        Debug.Log($"[UIManager] ✓ Score updated successfully");
-        Debug.Log($"[UIManager] Total players: {playerScores.Count}");
-        Debug.Log($"[UIManager] ==================");
     }
 
-    // ✅ FIX: Clean and clear score display
     private void UpdateScoreDisplay()
     {
-        if (scoreText == null)
-        {
-            Debug.LogWarning("[UIManager] ⚠️ scoreText is null!");
-            return;
-        }
+        if (scoreText == null) return;
 
         if (playerScores.Count == 0)
         {
@@ -335,25 +364,22 @@ public class UIManager : MonoBehaviour
             return;
         }
 
-        // Build score display
-        string display = "=== SCOREBOARD ===\n\n";
-
-        // Sort by kills (highest first)
+        string display = "SCOREBOARD\n\n";
         var sortedPlayers = playerScores.OrderByDescending(x => x.Value).ToList();
 
         for (int i = 0; i < sortedPlayers.Count; i++)
         {
             var player = sortedPlayers[i];
-            string medal = "";
+            string prefix = "";
 
             if (i == 0 && player.Value > 0)
-                medal = "🥇 ";
+                prefix = "1st ";
             else if (i == 1 && player.Value > 0)
-                medal = "🥈 ";
+                prefix = "2nd ";
             else if (i == 2 && player.Value > 0)
-                medal = "🥉 ";
+                prefix = "3rd ";
 
-            display += $"{medal}{player.Key} → {player.Value}\n";
+            display += $"{prefix}{player.Key}: {player.Value}\n";
         }
 
         scoreText.text = display;
@@ -376,49 +402,50 @@ public class UIManager : MonoBehaviour
         }
     }
 
-    // ✅ FIX: Debug display
-    private void OnGUI()
-    {
-        if (!Debug.isDebugBuild) return;
-
-        GUI.color = Color.cyan;
-        GUILayout.BeginArea(new Rect(Screen.width - 310, 10, 300, 150));
-        GUILayout.Label("=== UI MANAGER (CLIENT) ===");
-        GUILayout.Label($"Players Tracked: {playerScores.Count}");
-        GUILayout.Label($"Leader: {lastWinner} ({lastWinnerKills})");
-        GUILayout.Label($"Last Update: {Time.time - lastScoreUpdateTime:F1}s ago");
-        GUILayout.Label("--- Scores ---");
-        foreach (var kvp in playerScores.OrderByDescending(x => x.Value).Take(3))
-        {
-            GUILayout.Label($"{kvp.Key}: {kvp.Value}");
-        }
-        GUILayout.EndArea();
-    }
-
+    /// <summary>
+    /// Handles touch input dragging for camera look control
+    /// Now works fullscreen without being blocked by other UI
+    /// </summary>
     private class LookAreaHandler : MonoBehaviour, IDragHandler, IPointerDownHandler, IPointerUpHandler
     {
         public System.Action<Vector2> OnDragDelta;
         private Vector2 lastPos;
         private bool dragging = false;
+        private int touchId = -1;
 
         public void OnDrag(PointerEventData eventData)
         {
             if (!dragging) return;
-            Vector2 pos = eventData.position;
-            Vector2 delta = pos - lastPos;
-            lastPos = pos;
+
+            // Use eventData.delta directly - this is the most accurate
+            Vector2 delta = eventData.delta;
+
+            // Send delta immediately
             OnDragDelta?.Invoke(delta);
+
+            // Debug log to verify touch is working
+            if (delta.magnitude > 0.1f)
+            {
+                Debug.Log($"[LookArea] Touch drag delta: {delta}");
+            }
         }
 
         public void OnPointerDown(PointerEventData eventData)
         {
             dragging = true;
             lastPos = eventData.position;
+            touchId = eventData.pointerId;
+            Debug.Log($"[LookArea] Touch started at {eventData.position}");
         }
 
         public void OnPointerUp(PointerEventData eventData)
         {
-            dragging = false;
+            if (eventData.pointerId == touchId)
+            {
+                dragging = false;
+                touchId = -1;
+                Debug.Log("[LookArea] Touch ended");
+            }
         }
     }
 }

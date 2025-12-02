@@ -7,14 +7,18 @@ using System.Linq;
 using System.Threading.Tasks;
 using UnityEngine;
 
+/// <summary>
+/// Manages network connections, session creation, and player spawning.
+/// Implements INetworkRunnerCallbacks for Fusion networking events.
+/// </summary>
 public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
 {
+    [Header("Network Configuration")]
     public NetworkRunner runnerPrefab;
-    private NetworkRunner runner;
-
     public NetworkPrefabRef playerPrefab;
     public Transform[] spawnPoints;
 
+    private NetworkRunner runner;
     private string currentSessionName = "";
     private bool isConnecting = false;
     private int connectionAttempts = 0;
@@ -22,6 +26,7 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
 
     private void Start()
     {
+        // Subscribe to UI events
         Events.OnHostClicked += OnHostClicked;
         Events.OnQuickJoinClicked += OnQuickJoinClicked;
         Events.OnRestartClicked += OnRestartClicked;
@@ -29,7 +34,6 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
 
         Events.RaiseShowMenu(true);
         Events.RaiseSetStatusText("Ready to connect");
-        Debug.Log("[NetworkManager] Initialized");
     }
 
     private void OnDestroy()
@@ -43,27 +47,31 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
             runner.RemoveCallbacks(this);
     }
 
+    /// <summary>
+    /// Handle host button click - create new session
+    /// </summary>
     private void OnHostClicked()
     {
         if (isConnecting) return;
 
-        // Generate unique session name with timestamp
         currentSessionName = $"ARENA_{System.DateTime.UtcNow.Ticks}";
-        Debug.Log($"[NetworkManager] Creating NEW session as Host: {currentSessionName}");
-
         StartRunner(GameMode.Host, currentSessionName);
     }
 
+    /// <summary>
+    /// Handle quick join button click - find available session
+    /// </summary>
     private void OnQuickJoinClicked()
     {
         if (isConnecting) return;
 
-        Debug.Log("[NetworkManager] Quick Join - searching for available rooms...");
-        currentSessionName = ""; // Empty = search for any room
-
+        currentSessionName = "";
         StartRunner(GameMode.AutoHostOrClient, currentSessionName);
     }
 
+    /// <summary>
+    /// Start network runner with specified mode and session
+    /// </summary>
     private async void StartRunner(GameMode mode, string sessionName)
     {
         if (isConnecting)
@@ -72,10 +80,9 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
             return;
         }
 
-        // Cleanup existing runner before starting new one
+        // Cleanup existing runner
         if (runner != null)
         {
-            Debug.Log("[NetworkManager] Cleaning up existing runner...");
             await runner.Shutdown();
             CleanupRunner();
             await Task.Delay(500);
@@ -84,6 +91,7 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
         isConnecting = true;
         connectionAttempts = 0;
 
+        // Retry loop
         while (connectionAttempts < MAX_CONNECTION_ATTEMPTS)
         {
             connectionAttempts++;
@@ -93,7 +101,6 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
                 : $"Finding room... ({connectionAttempts}/{MAX_CONNECTION_ATTEMPTS})";
 
             Events.RaiseSetStatusText(statusMsg);
-            Debug.Log($"[NetworkManager] Attempt {connectionAttempts} - Mode: {mode}");
 
             try
             {
@@ -119,17 +126,12 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
                     CustomLobbyName = "DefaultLobby"
                 };
 
-                Debug.Log($"[NetworkManager] Starting - Mode: {mode}, Session: {sessionName ?? "ANY"}");
-
                 var startResult = await runner.StartGame(args);
 
                 if (startResult.Ok)
                 {
-                    string roleText = runner.IsServer ? "Host/Server" : "Client";
+                    string roleText = runner.IsServer ? "Host" : "Client";
                     currentSessionName = runner.SessionInfo.Name;
-
-                    Debug.Log($"[NetworkManager] ✓ Connected as {roleText}");
-                    Debug.Log($"[NetworkManager] Session: {currentSessionName}");
 
                     Events.RaiseSetStatusText($"Connected as {roleText}");
                     isConnecting = false;
@@ -138,12 +140,9 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
                 }
                 else
                 {
-                    Debug.LogWarning($"[NetworkManager] Start failed: {startResult.ShutdownReason}");
-
                     // If AutoHostOrClient failed to find room, become host
                     if (mode == GameMode.AutoHostOrClient && connectionAttempts >= 2)
                     {
-                        Debug.Log("[NetworkManager] No rooms found, becoming host...");
                         CleanupRunner();
                         currentSessionName = $"ARENA_{System.DateTime.UtcNow.Ticks}";
                         mode = GameMode.Host;
@@ -158,7 +157,6 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
             }
             catch (Exception ex)
             {
-                Debug.LogError($"[NetworkManager] Exception: {ex.Message}");
                 Events.RaiseSetStatusText($"Error: {ex.Message}");
                 CleanupRunner();
                 await Task.Delay(1000);
@@ -166,12 +164,14 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
         }
 
         // All attempts failed
-        Debug.LogError("[NetworkManager] Connection failed after all retries");
         Events.RaiseSetStatusText("Connection failed - Please retry");
         isConnecting = false;
         Events.RaiseShowMenu(true);
     }
 
+    /// <summary>
+    /// Clean up runner instance
+    /// </summary>
     private void CleanupRunner()
     {
         if (runner != null)
@@ -183,13 +183,14 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
         }
     }
 
+    /// <summary>
+    /// Handle restart button click
+    /// </summary>
     private void OnRestartClicked()
     {
-        Debug.Log("[NetworkManager] Restart requested");
-
         if (runner != null && runner.IsServer)
         {
-            // ✅ Use RPC to start match on all clients
+            // Use RPC to start match on all clients
             var players = FindObjectsOfType<PlayerController>();
             if (players.Length > 0 && players[0].Object != null && players[0].Object.HasStateAuthority)
             {
@@ -212,15 +213,15 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
         }
         else
         {
-            Debug.Log("[NetworkManager] Only host can restart");
             Events.RaiseSetStatusText("Only host can restart");
         }
     }
 
+    /// <summary>
+    /// Handle leave button click - disconnect and return to menu
+    /// </summary>
     private async void OnLeaveClicked()
     {
-        Debug.Log("[NetworkManager] Leave clicked");
-
         if (runner != null)
         {
             await runner.Shutdown();
@@ -231,6 +232,11 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
         Events.RaiseSetStatusText("Disconnected");
     }
 
+    #region Fusion Callbacks
+
+    /// <summary>
+    /// Provide input data to Fusion
+    /// </summary>
     public void OnInput(NetworkRunner runnerRef, NetworkInput input)
     {
         var im = InputManager.Instance;
@@ -247,12 +253,14 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
         input.Set(data);
     }
 
+    /// <summary>
+    /// Called when a player joins the session
+    /// </summary>
     public void OnPlayerJoined(NetworkRunner runnerRef, PlayerRef player)
     {
-        Debug.Log($"[NetworkManager] Player {player.PlayerId} joined (IsServer: {runnerRef.IsServer})");
-
         if (runnerRef.IsServer)
         {
+            // Spawn player at random spawn point
             Vector3 pos = Vector3.zero;
             Quaternion rot = Quaternion.identity;
 
@@ -269,15 +277,11 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
                     rot = sp.rotation;
             }
 
-            var playerObj = runnerRef.Spawn(playerPrefab, pos, rot, player);
-            Debug.Log($"[NetworkManager] ✓ Spawned player {player.PlayerId} at {pos}");
+            runnerRef.Spawn(playerPrefab, pos, rot, player);
 
-            // ✅ Start match when 2+ players join
+            // Start match when 2+ players join
             if (runnerRef.ActivePlayers.Count() >= 2)
             {
-                Debug.Log("[NetworkManager] 2+ players - starting match via RPC");
-
-                // Wait a frame for all spawns to complete
                 Invoke(nameof(StartMatchForAllClients), 0.5f);
             }
         }
@@ -285,7 +289,9 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
         Events.RaiseSetStatusText($"Players: {runnerRef.ActivePlayers.Count()}");
     }
 
-    // ✅ NEW: Start match using RPC
+    /// <summary>
+    /// Start match using RPC when enough players join
+    /// </summary>
     private void StartMatchForAllClients()
     {
         if (runner == null || !runner.IsServer) return;
@@ -293,12 +299,10 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
         var players = FindObjectsOfType<PlayerController>();
         if (players.Length > 0)
         {
-            // Find any player with state authority to call RPC
             foreach (var p in players)
             {
                 if (p.Object != null && p.Object.HasStateAuthority)
                 {
-                    Debug.Log($"[NetworkManager] 🎮 Starting match via {p.PlayerName}");
                     p.RPC_StartMatchOnAllClients();
                     break;
                 }
@@ -306,21 +310,24 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
         }
     }
 
+    /// <summary>
+    /// Called when a player leaves the session
+    /// </summary>
     public void OnPlayerLeft(NetworkRunner runnerRef, PlayerRef player)
     {
-        Debug.Log($"[NetworkManager] Player {player.PlayerId} left");
         Events.RaiseSetStatusText($"Players: {runnerRef.ActivePlayers.Count()}");
 
         if (runnerRef.ActivePlayers.Count() < 2)
         {
-            Debug.Log("[NetworkManager] Less than 2 players - ending match");
             Events.RaiseMatchEnd();
         }
     }
 
+    /// <summary>
+    /// Called when runner shuts down
+    /// </summary>
     public void OnShutdown(NetworkRunner runnerRef, ShutdownReason shutdownReason)
     {
-        Debug.Log($"[NetworkManager] Shutdown: {shutdownReason}");
         CleanupRunner();
         Events.RaiseShowMenu(true);
         Events.RaiseSetStatusText($"Disconnected: {shutdownReason}");
@@ -329,20 +336,17 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
 
     public void OnConnectedToServer(NetworkRunner runner)
     {
-        Debug.Log("[NetworkManager] Connected to server");
         Events.RaiseSetStatusText("Connected!");
     }
 
     public void OnConnectFailed(NetworkRunner runner, NetAddress remoteAddress, NetConnectFailedReason reason)
     {
-        Debug.LogError($"[NetworkManager] Connect failed: {reason}");
         Events.RaiseSetStatusText($"Failed: {reason}");
         isConnecting = false;
     }
 
     public void OnDisconnectedFromServer(NetworkRunner runner, NetDisconnectReason reason)
     {
-        Debug.LogWarning($"[NetworkManager] Disconnected: {reason}");
         Events.RaiseSetStatusText($"Disconnected: {reason}");
         isConnecting = false;
     }
@@ -350,10 +354,7 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
     // Unused callbacks
     public void OnConnectRequest(NetworkRunner runner, NetworkRunnerCallbackArgs.ConnectRequest request, byte[] token) { }
     public void OnUserSimulationMessage(NetworkRunner runner, SimulationMessagePtr message) { }
-    public void OnSessionListUpdated(NetworkRunner runner, List<SessionInfo> sessionList)
-    {
-        Debug.Log($"[NetworkManager] Sessions found: {sessionList.Count}");
-    }
+    public void OnSessionListUpdated(NetworkRunner runner, List<SessionInfo> sessionList) { }
     public void OnCustomAuthenticationResponse(NetworkRunner runner, Dictionary<string, object> data) { }
     public void OnHostMigration(NetworkRunner runner, HostMigrationToken hostMigrationToken) { }
     public void OnReliableDataReceived(NetworkRunner runner, PlayerRef player, ReliableKey key, ArraySegment<byte> data) { }
@@ -367,4 +368,6 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
     public void OnPlayerDisconnected(NetworkRunner runner, PlayerRef player) { }
     public void OnObjectSpawned(NetworkRunner runner, NetworkObject obj) { }
     public void OnObjectDestroyed(NetworkRunner runner, NetworkObject obj) { }
+
+    #endregion
 }
