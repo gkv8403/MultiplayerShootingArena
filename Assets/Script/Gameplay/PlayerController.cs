@@ -49,13 +49,13 @@ namespace Scripts.Gameplay
         private Vector3 lastSyncedPosition;
         private Quaternion lastSyncedRotation;
         private float lastSyncTime;
-        private int lastBroadcastedKills = -1;
 
         public override void Spawned()
         {
             Debug.Log($"[Player] ===== PLAYER SPAWNED =====");
             Debug.Log($"[Player] HasInputAuthority: {Object.HasInputAuthority}");
             Debug.Log($"[Player] HasStateAuthority: {Object.HasStateAuthority}");
+            Debug.Log($"[Player] PlayerId: {Object.InputAuthority.PlayerId}");
 
             if (characterController == null)
             {
@@ -107,7 +107,7 @@ namespace Scripts.Gameplay
 
             if (Object.HasStateAuthority)
             {
-                Debug.Log("[Player] Initializing as SERVER");
+                Debug.Log("[Player] ✅ Initializing as SERVER");
                 Health = maxHealth;
                 Kills = 0;
                 Deaths = 0;
@@ -134,8 +134,8 @@ namespace Scripts.Gameplay
                 NetPosition = transform.position;
                 NetRotation = transform.rotation;
 
-                lastBroadcastedKills = 0;
-                Invoke(nameof(BroadcastInitialScore), 0.5f);
+                // ✅ Broadcast initial score to all clients
+                Invoke(nameof(BroadcastInitialScore), 1f);
             }
 
             lastSyncedPosition = transform.position;
@@ -155,8 +155,8 @@ namespace Scripts.Gameplay
         {
             if (Object.HasStateAuthority)
             {
-                Debug.Log($"[Player] 📊 Broadcasting initial score for {PlayerName}");
-                RPC_BroadcastScore(PlayerName, Kills);
+                Debug.Log($"[Player] 📊 SERVER: Broadcasting initial score for {PlayerName}");
+                RPC_UpdateScoreOnAllClients(PlayerName, 0);
             }
         }
 
@@ -306,25 +306,17 @@ namespace Scripts.Gameplay
             var proj = no.GetComponent<Projectile>();
             if (proj != null)
             {
-                Debug.Log($"[Player] 🔫 {PlayerName} firing projectile from {position} dir {direction}");
+                Debug.Log($"[Player] 🔫 SERVER: {PlayerName} firing projectile");
                 proj.Fire(Object.InputAuthority, position, direction);
-                RPC_OnFireVisual();
             }
         }
 
-        [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
-        private void RPC_OnFireVisual()
-        {
-            Debug.Log($"[Player] 🎬 Fire visual for {PlayerName}");
-        }
-
-        // ✅ SERVER-SIDE ONLY damage method called directly by Projectile
+        // ✅ SERVER-SIDE damage application
         public void ApplyDamageServerSide(int dmg, PlayerRef attacker)
         {
-            // CRITICAL: This MUST only be called on server
             if (!Object.HasStateAuthority)
             {
-                Debug.LogError($"[Player] ❌❌❌ ApplyDamageServerSide called on CLIENT! This is wrong!");
+                Debug.LogError($"[Player] ❌ ApplyDamageServerSide called on CLIENT!");
                 return;
             }
 
@@ -334,12 +326,12 @@ namespace Scripts.Gameplay
                 return;
             }
 
-            Debug.Log($"[Player] 💥💥💥 SERVER: {PlayerName} taking {dmg} damage from {attacker}");
+            Debug.Log($"[Player] 💥 SERVER: {PlayerName} taking {dmg} damage from player {attacker.PlayerId}");
 
             Health -= dmg;
 
-            // Sync health to all clients
-            RPC_UpdateHealthVisual(Health);
+            // ✅ Update health on all clients
+            RPC_UpdateHealthOnAllClients(Health);
 
             Debug.Log($"[Player] ❤️ SERVER: {PlayerName} health now {Health}/{maxHealth}");
 
@@ -349,9 +341,9 @@ namespace Scripts.Gameplay
                 IsDead = true;
                 Deaths++;
 
-                Debug.Log($"[Player] 💀💀💀 SERVER: {PlayerName} DIED!");
+                Debug.Log($"[Player] 💀 SERVER: {PlayerName} DIED!");
 
-                // Award kill
+                // ✅ Award kill to attacker
                 if (attacker != PlayerRef.None && Runner.TryGetPlayerObject(attacker, out NetworkObject attackerObj))
                 {
                     var attackerPC = attackerObj.GetComponent<PlayerController>();
@@ -360,46 +352,51 @@ namespace Scripts.Gameplay
                         attackerPC.Kills++;
                         int newKills = attackerPC.Kills;
 
-                        Debug.Log($"[Player] 🎉🏆🎉 SERVER: {attackerPC.PlayerName} GOT KILL #{newKills}!");
+                        Debug.Log($"[Player] 🎉 SERVER: {attackerPC.PlayerName} got kill #{newKills}!");
 
-                        // Broadcast score immediately
-                        if (attackerPC.lastBroadcastedKills != newKills)
-                        {
-                            attackerPC.lastBroadcastedKills = newKills;
-                            attackerPC.RPC_BroadcastScore(attackerPC.PlayerName, newKills);
-                            Events.RaiseUpdateScore(attackerPC.PlayerName.ToString(), newKills);
+                        // ✅ CRITICAL: Update score on ALL clients immediately
+                        attackerPC.RPC_UpdateScoreOnAllClients(attackerPC.PlayerName, newKills);
 
-                            Debug.Log($"[Player] 📢📢📢 Broadcasted score: {attackerPC.PlayerName} = {newKills}");
-                        }
+                        Debug.Log($"[Player] 📢 SERVER: Broadcasted score update to all clients");
                     }
                 }
 
+                // Update visuals
                 RPC_OnPlayerDied();
                 RespawnTimer = TickTimer.CreateFromSeconds(Runner, 3f);
             }
         }
 
+        // ✅ RPC to update score on ALL clients (including server)
         [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
-        private void RPC_UpdateHealthVisual(int newHealth)
+        public void RPC_UpdateScoreOnAllClients(NetworkString<_16> pName, int kills)
+        {
+            string playerNameStr = pName.ToString();
+
+            Debug.Log($"[Player] 📊 RPC received on {(Object.HasStateAuthority ? "SERVER" : "CLIENT")}: {playerNameStr} = {kills} kills");
+
+            // ✅ Raise event locally on this client/server
+            Events.RaiseUpdateScore(playerNameStr, kills);
+
+            Debug.Log($"[Player] ✅ Score event raised locally for {playerNameStr}");
+        }
+
+        // ✅ RPC to update health on all clients
+        [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
+        private void RPC_UpdateHealthOnAllClients(int newHealth)
         {
             Health = newHealth;
             if (healthBar != null)
                 healthBar.fillAmount = (float)Health / maxHealth;
+
+            Debug.Log($"[Player] ❤️ Health updated to {newHealth} on {(Object.HasStateAuthority ? "SERVER" : "CLIENT")}");
         }
 
         [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
         private void RPC_OnPlayerDied()
         {
-            Debug.Log($"[Player] 💀 CLIENT: {PlayerName} died (visual)");
+            Debug.Log($"[Player] 💀 {PlayerName} died (visual update)");
             RPC_SetVisible(false);
-        }
-
-        [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
-        public void RPC_BroadcastScore(NetworkString<_16> pName, int kills)
-        {
-            string playerNameStr = pName.ToString();
-            Debug.Log($"[Player] 📊 RPC_BroadcastScore: {playerNameStr} = {kills}");
-            Events.RaiseUpdateScore(playerNameStr, kills);
         }
 
         [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
@@ -506,10 +503,11 @@ namespace Scripts.Gameplay
 
             GUI.color = Color.green;
             GUILayout.BeginArea(new Rect(Screen.width - 300, 10, 290, 140));
-            GUILayout.Label($"[{PlayerName}]");
+            GUILayout.Label($"[{PlayerName}] - SERVER");
             GUILayout.Label($"Kills: {Kills} | Deaths: {Deaths}");
             GUILayout.Label($"Health: {Health}/{maxHealth}");
             GUILayout.Label($"Combat: {CombatEnabled}");
+            GUILayout.Label($"Dead: {IsDead}");
             GUILayout.EndArea();
         }
     }

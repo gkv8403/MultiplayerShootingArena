@@ -93,7 +93,7 @@ public class GameManager : MonoBehaviour
                 playerKills[pName] = 0;
 
                 // Broadcast initial score
-                p.RPC_BroadcastScore(p.PlayerName, 0);
+                p.RPC_UpdateScoreOnAllClients(p.PlayerName, 0);
 
                 Debug.Log($"[GameManager] ✓ Reset player {pName} - Combat: ENABLED");
             }

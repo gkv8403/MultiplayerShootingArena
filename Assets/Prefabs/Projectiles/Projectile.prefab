@@ -15,6 +15,7 @@ GameObject:
   - component: {fileID: 1203079102393687991}
   - component: {fileID: -7608412270093557611}
   - component: {fileID: -6560065935333580742}
+  - component: {fileID: 2472133764886766236}
   m_Layer: 0
   m_Name: Projectile
   m_TagString: Untagged
@@ -123,12 +124,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 832f8b7e9077c4c4692ceba9e2602c29, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  _IsActive: 0
+  _IsActiveNetworked: 0
+  _NetworkPosition: {x: 0, y: 0, z: 0}
+  _NetworkVelocity: {x: 0, y: 0, z: 0}
   speed: 20
   damage: 20
-  lifetime: 3
-  visualObject: {fileID: 0}
-  trail: {fileID: 0}
+  lifeSeconds: 4
 --- !u!114 &-7608412270093557611
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -143,10 +144,11 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   SortKey: 2446510572
   ObjectInterest: 1
-  Flags: 262145
+  Flags: 786433
   NestedObjects: []
   NetworkedBehaviours:
   - {fileID: 1203079102393687991}
+  - {fileID: 2472133764886766236}
   ForceRemoteRenderTimeframe: 0
 --- !u!54 &-6560065935333580742
 Rigidbody:
@@ -172,6 +174,23 @@ Rigidbody:
   m_ImplicitTensor: 1
   m_UseGravity: 1
   m_IsKinematic: 1
-  m_Interpolate: 0
+  m_Interpolate: 1
   m_Constraints: 0
   m_CollisionDetection: 1
+--- !u!114 &2472133764886766236
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7262875616051944351}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 158639473, guid: e725a070cec140c4caffb81624c8c787, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  _stateAuthorityChangeErrorCorrectionDelta: 0
+  SyncScale: 0
+  SyncParent: 0
+  _autoAOIOverride: 1
+  DisableSharedModeInterpolation: 0

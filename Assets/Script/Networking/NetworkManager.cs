@@ -204,7 +204,8 @@ public class NetworkManager : MonoBehaviour, INetworkRunnerCallbacks
                     p.Kills = 0;
                     p.Deaths = 0;
                     p.Health = p.maxHealth;
-                    p.RPC_BroadcastScore(p.PlayerName, 0);
+                    // Broadcast initial score
+                    p.RPC_UpdateScoreOnAllClients(p.PlayerName, 0);
                 }
             }
 
