@@ -18,9 +18,11 @@ public class Projectile : NetworkBehaviour
     private TrailRenderer trail;
     private MeshRenderer meshRenderer;
     private bool isInitialized = false;
-
-    // ✅ Track state changes manually
     private bool lastActiveState = false;
+
+    // ✅ NEW: More explicit visibility control
+    private bool isVisibleNow = false;
+    private int invisibleFrames = 0; // Track frames to stay invisible
 
     private void Awake()
     {
@@ -30,8 +32,6 @@ public class Projectile : NetworkBehaviour
         if (meshRenderer == null)
         {
             Debug.LogError("[Projectile] ⚠️ NO MESHRENDERER FOUND! Check your prefab!");
-
-            // Try to find it more aggressively
             var allRenderers = GetComponentsInChildren<Renderer>(true);
             foreach (var r in allRenderers)
             {
@@ -43,13 +43,9 @@ public class Projectile : NetworkBehaviour
                 }
             }
         }
-        else
-        {
-            Debug.Log($"[Projectile] ✓ MeshRenderer found: {meshRenderer.gameObject.name}");
-        }
 
-        // Start hidden
-        SetVisibility(false);
+        // ✅ CRITICAL: Force invisible immediately
+        ForceInvisible();
     }
 
     public override void Spawned()
@@ -65,7 +61,37 @@ public class Projectile : NetworkBehaviour
         }
 
         lastActiveState = IsActiveNetworked;
-        SetVisibility(IsActiveNetworked);
+
+        // ✅ CRITICAL: Force invisible on spawn
+        ForceInvisible();
+    }
+
+    // ✅ NEW: More aggressive invisibility
+    private void ForceInvisible()
+    {
+        isVisibleNow = false;
+        invisibleFrames = 2; // Stay invisible for at least 2 frames
+
+        // Disable ALL renderers
+        var allRenderers = GetComponentsInChildren<Renderer>(true);
+        foreach (var r in allRenderers)
+        {
+            if (r != null)
+            {
+                r.enabled = false;
+            }
+        }
+
+        if (meshRenderer != null)
+        {
+            meshRenderer.enabled = false;
+        }
+
+        if (trail != null)
+        {
+            trail.enabled = false;
+            trail.Clear();
+        }
     }
 
     public void ForceDeactivateNetworked()
@@ -78,8 +104,11 @@ public class Projectile : NetworkBehaviour
         LifeTimer = TickTimer.None;
         NetworkPosition = Vector3.one * 9999f;
 
+        // ✅ Move to hidden position FIRST
         transform.position = NetworkPosition;
-        SetVisibility(false);
+
+        // ✅ THEN force invisible
+        ForceInvisible();
     }
 
     public void Fire(PlayerRef owner, Vector3 position, Vector3 direction)
@@ -88,38 +117,66 @@ public class Projectile : NetworkBehaviour
 
         Debug.Log($"[Projectile] 🔫 SERVER: Firing from {position} for Player{owner.PlayerId}");
 
-        Owner = owner;
+        // ✅ CRITICAL: Force invisible FIRST
+        ForceInvisible();
+
+        // ✅ CRITICAL: Set position IMMEDIATELY (before any network update)
+        transform.position = position;
         NetworkPosition = position;
+
+        Owner = owner;
         NetworkVelocity = direction.normalized * speed;
         LifeTimer = TickTimer.CreateFromSeconds(Runner, lifeSeconds);
-
-        transform.position = position;
-
-        // Set active and show
         IsActiveNetworked = true;
-        SetVisibility(true);
 
-        Debug.Log($"[Projectile] ✅ SERVER: Projectile activated for Player{owner.PlayerId}");
+        // ✅ Wait 1 frame before showing (let position settle)
+        invisibleFrames = 1;
+
+        Debug.Log($"[Projectile] ✅ SERVER: Projectile setup at {position}, will show next frame");
     }
 
     public override void FixedUpdateNetwork()
     {
         if (!isInitialized) return;
 
-        // ✅ CRITICAL: Check for state changes FIRST on all machines
+        // ✅ CRITICAL: Handle invisibility countdown
+        if (invisibleFrames > 0)
+        {
+            invisibleFrames--;
+            if (invisibleFrames == 0 && IsActiveNetworked)
+            {
+                // Now we can show it
+                MakeVisible();
+            }
+            else
+            {
+                // Keep it invisible
+                ForceInvisible();
+                return; // Don't do any other updates
+            }
+        }
+
+        // Check for state changes
         if (lastActiveState != IsActiveNetworked)
         {
             string role = Object.HasStateAuthority ? "SERVER" : "CLIENT";
             Debug.Log($"[Projectile] 🔄 {role}: State changed {lastActiveState} → {IsActiveNetworked}");
 
-            SetVisibility(IsActiveNetworked);
-            lastActiveState = IsActiveNetworked;
-
-            // Force update on client
-            if (!Object.HasStateAuthority && IsActiveNetworked)
+            if (IsActiveNetworked)
             {
-                Debug.Log($"[Projectile] 🔥 CLIENT: Projectile activated at {NetworkPosition}");
+                // Wait 1 frame before showing on clients too
+                if (!Object.HasStateAuthority)
+                {
+                    transform.position = NetworkPosition;
+                    invisibleFrames = 1;
+                }
             }
+            else
+            {
+                ForceInvisible();
+            }
+
+            lastActiveState = IsActiveNetworked;
         }
 
         if (Object.HasStateAuthority)
@@ -132,12 +189,63 @@ public class Projectile : NetworkBehaviour
         }
     }
 
+    // ✅ NEW: Explicit method to make visible
+    private void MakeVisible()
+    {
+        if (isVisibleNow) return; // Already visible
+
+        string role = Object != null && Object.HasStateAuthority ? "SERVER" : "CLIENT";
+        Debug.Log($"[Projectile] 👁️ {role}: Making visible at {transform.position}");
+
+        isVisibleNow = true;
+
+        // Enable all non-trail renderers
+        var allRenderers = GetComponentsInChildren<Renderer>(true);
+        foreach (var r in allRenderers)
+        {
+            if (r != null && !(r is TrailRenderer))
+            {
+                r.enabled = true;
+            }
+        }
+
+        if (meshRenderer != null)
+        {
+            meshRenderer.enabled = true;
+        }
+
+        // Enable trail
+        if (trail != null)
+        {
+            trail.Clear();
+            trail.enabled = true;
+        }
+
+        // ✅ Broadcast to clients if server
+        if (Object.HasStateAuthority)
+        {
+            RPC_MakeVisible();
+        }
+    }
+
+    // ✅ NEW: RPC to make visible on clients
+    [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
+    private void RPC_MakeVisible()
+    {
+        if (Object.HasStateAuthority) return; // Already handled on server
+
+        Debug.Log($"[Projectile] 🔄 CLIENT: RPC_MakeVisible at {NetworkPosition}");
+        transform.position = NetworkPosition;
+        invisibleFrames = 0;
+        MakeVisible();
+    }
+
     private void ServerSimulation()
     {
-        if (!IsActiveNetworked)
-        {
-            return;
-        }
+        if (!IsActiveNetworked) return;
+
+        // ✅ Don't update if still invisible
+        if (invisibleFrames > 0) return;
 
         // Check lifetime
         if (LifeTimer.Expired(Runner))
@@ -178,10 +286,6 @@ public class Projectile : NetworkBehaviour
                         Debug.Log($"[Projectile] 🎯 SERVER: Hit player {pc.PlayerName} | Attacker: Player{Owner.PlayerId}");
                         pc.ApplyDamageServerSide(damage, Owner);
                     }
-                    else if (pc.Object.InputAuthority == Owner)
-                    {
-                        Debug.Log($"[Projectile] ⚠️ SERVER: Can't hit self");
-                    }
                 }
             }
 
@@ -196,99 +300,45 @@ public class Projectile : NetworkBehaviour
 
     private void ClientSimulation()
     {
-        if (!IsActiveNetworked)
-        {
-            return;
-        }
+        if (!IsActiveNetworked) return;
+
+        // ✅ Don't interpolate if invisible
+        if (invisibleFrames > 0) return;
 
         // Smooth interpolation
-        transform.position = Vector3.Lerp(transform.position, NetworkPosition, 20f * Runner.DeltaTime);
-    }
-
-    // ✅ CRITICAL FIX: More aggressive visibility control
-    private void SetVisibility(bool visible)
-    {
-        string role = Object != null && Object.HasStateAuthority ? "SERVER" : "CLIENT";
-
-        Debug.Log($"[Projectile] 👁️ {role}: SetVisibility({visible}) called");
-
-        // Method 1: Force specific MeshRenderer
-        if (meshRenderer != null)
-        {
-            meshRenderer.enabled = visible;
-            Debug.Log($"[Projectile] 👁️ {role}: MeshRenderer.enabled = {visible} on {meshRenderer.gameObject.name}");
-        }
-        else
-        {
-            Debug.LogError($"[Projectile] ❌ {role}: MeshRenderer is NULL!");
-        }
-
-        // Method 2: Force ALL MeshRenderers (redundant but safe)
-        var allMeshRenderers = GetComponentsInChildren<MeshRenderer>(true);
-        Debug.Log($"[Projectile] 👁️ {role}: Found {allMeshRenderers.Length} MeshRenderers");
-
-        foreach (var mr in allMeshRenderers)
-        {
-            if (mr != null)
-            {
-                mr.enabled = visible;
-                Debug.Log($"[Projectile] 👁️ {role}: Set {mr.gameObject.name} MeshRenderer to {visible}");
-            }
-        }
-
-        // Method 3: Force all non-trail renderers
-        var allRenderers = GetComponentsInChildren<Renderer>(true);
-        foreach (var r in allRenderers)
-        {
-            if (r != null && !(r is TrailRenderer))
-            {
-                r.enabled = visible;
-            }
-        }
-
-        // Handle trail
-        if (trail != null)
-        {
-            if (visible && !trail.enabled)
-            {
-                trail.Clear();
-                trail.enabled = true;
-            }
-            else if (!visible && trail.enabled)
-            {
-                trail.enabled = false;
-            }
-        }
-
-        // Final verification
-        if (meshRenderer != null)
-        {
-            Debug.Log($"[Projectile] ✓ {role}: Final MeshRenderer state = {meshRenderer.enabled}");
-        }
+        transform.position = Vector3.Lerp(transform.position, NetworkPosition, 25f * Runner.DeltaTime);
     }
 
     private void Deactivate()
     {
         if (!Object.HasStateAuthority) return;
         Debug.Log($"[Projectile] 🔴 SERVER: Deactivating");
+
+        // ✅ Immediate deactivation
+        RPC_ForceDeactivate();
         ForceDeactivateNetworked();
     }
 
-    // ✅ DIAGNOSTIC: Visual indicator
-    private void OnGUI()
+    // ✅ RPC to force deactivation on all clients
+    [Rpc(RpcSources.StateAuthority, RpcTargets.All)]
+    private void RPC_ForceDeactivate()
     {
-        if (!Application.isPlaying || !IsActiveNetworked) return;
-        if (Camera.main == null) return;
+        string role = Object.HasStateAuthority ? "SERVER" : "CLIENT";
+        Debug.Log($"[Projectile] 🔴 {role}: RPC_ForceDeactivate");
 
-        Vector3 screenPos = Camera.main.WorldToScreenPoint(transform.position);
-        if (screenPos.z > 0 && screenPos.x > 0 && screenPos.x < Screen.width && screenPos.y > 0 && screenPos.y < Screen.height)
+        ForceInvisible();
+    }
+
+    // ✅ Force visibility check every frame (backup)
+    private void LateUpdate()
+    {
+        // If we're supposed to be invisible, enforce it every frame
+        if (!IsActiveNetworked || invisibleFrames > 0)
         {
-            string role = Object.HasStateAuthority ? "S" : "C";
-            string meshStatus = meshRenderer != null && meshRenderer.enabled ? "✓" : "✗";
-
-            GUI.color = Object.HasStateAuthority ? Color.green : Color.yellow;
-            GUI.Label(new Rect(screenPos.x - 20, Screen.height - screenPos.y - 10, 100, 20),
-                $"{role} {meshStatus}");
+            if (isVisibleNow)
+            {
+                ForceInvisible();
+            }
         }
     }
 
@@ -303,6 +353,13 @@ public class Projectile : NetworkBehaviour
         {
             Gizmos.color = Color.red;
             Gizmos.DrawRay(transform.position, NetworkVelocity.normalized * 1f);
+        }
+
+        // Show invisibility state
+        if (invisibleFrames > 0)
+        {
+            Gizmos.color = Color.magenta;
+            Gizmos.DrawWireCube(transform.position, Vector3.one * 0.3f);
         }
     }
 }
